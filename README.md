@@ -41,7 +41,6 @@ Each operator is a small, composable unit:
 | Operator | What It Does |
 |----------|--------------|
 | `MemoryScan` | Iterates over an in-memory slice |
-| `FileScan` | Reads a CSV file row by row |
 | `HeapFileScan` | Reads binary slotted pages |
 | `Selection` | Filters rows with a predicate |
 | `Projection` | Picks/transforms columns |
@@ -54,11 +53,11 @@ Each operator is a small, composable unit:
 
 ```
 database/
-├── cmd/main.go           # Integration test
 ├── executors/            # Query operators
 ├── storage/              # Pages, records, file I/O
 ├── tx/                   # Transaction management, commit log
 ├── btree/                # B+ tree index
+├── learn/                # Integration tests
 ├── movies.csv            # Sample data (27K movies)
 └── go.mod
 ```
@@ -66,18 +65,18 @@ database/
 ## How to Run
 
 ```bash
-# Unit tests (storage, executors, btree)
+# Unit tests (storage, executors, btree, tx)
 go test ./...
 
-# Integration test (loads CSV, builds pages, inserts, queries, indexes)
-go run ./cmd/
+# Integration tests (learn/)
+go test ./learn/... -v
 ```
 
 ## Example Query
 
 ```go
 // Scan → filter Comedy → pick title → limit 5
-scan, _ := executors.NewFileScan("movies.csv")
+scan, _ := executors.NewHeapFileScan("movies.data")
 filtered := executors.NewSelection(scan, func(t storage.Tuple) bool {
     return strings.Contains(t[2].(string), "Comedy")
 })
@@ -98,11 +97,11 @@ clog, _ := tx.OpenCommitLog("clog.data")
 defer clog.Close()
 
 // tx=1: INSERT A, COMMIT
-recA := storage.Insert(1, 0, storage.Tuple{"A"})
+recA := storage.InsertTxRecord(1, 0, storage.Tuple{"A"})
 clog.LogCommit(1)
 
 // tx=2: INSERT B (NOT committed)
-recB := storage.Insert(2, 0, storage.Tuple{"B"})
+recB := storage.InsertTxRecord(2, 0, storage.Tuple{"B"})
 // clog.LogCommit(2) — not committed!
 
 // tx=1 sees [A] (committed before tx=1 started)
@@ -170,7 +169,7 @@ recB.Visible(3, clog) // false
 
 ## TODO
 
-- [ ] Refactor all tests + `cmd/main.go` into proper `_test.go` files
+- [x] Refactor all tests + `cmd/main.go` into proper `_test.go` files
 - [ ] JOIN operators (Nested Loop, Hash Join, Sort-Merge Join)
 - [ ] Integrate transactions into executors (automatic clog logging)
 - [ ] Buffer Pool (LRU cache, page eviction, flush clog/memory to disk)

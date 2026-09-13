@@ -103,25 +103,20 @@ func (cl *CommitLog) append(txId uint64, status ClogStatus) error {
 }
 
 // load reads all records from disk into memory.
+// File format: just records, no count header.
+// Each record: [8 bytes txId][1 byte status]
 func (cl *CommitLog) load() error {
 	// seek to start
 	if _, err := cl.file.Seek(0, os.SEEK_SET); err != nil {
 		return err
 	}
 
-	// read count
-	countBuf := make([]byte, 4)
-	if _, err := cl.file.Read(countBuf); err != nil {
-		// empty file is OK
-		return nil
-	}
-	count := binary.LittleEndian.Uint32(countBuf)
-
-	// read records
-	for i := uint32(0); i < count; i++ {
+	// read records until EOF
+	for {
 		recBuf := make([]byte, 9)
-		if _, err := cl.file.Read(recBuf); err != nil {
-			break
+		_, err := cl.file.Read(recBuf)
+		if err != nil {
+			break // EOF or error
 		}
 		txId := binary.LittleEndian.Uint64(recBuf[0:])
 		status := ClogStatus(recBuf[8])

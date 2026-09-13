@@ -330,16 +330,16 @@ func (r TxRecord) Visible(currentTxId uint64, clog *tx.CommitLog) bool {
 	return false
 }
 
-// Insert creates a new TxRecord for insertion.
+// InsertTxRecord creates a new TxRecord for an INSERT operation.
 //
 // Example:
 //
-//	rec := Insert(5, 0, Tuple{uint32(1), "Toy Story", "Adventure"})
+//	rec := InsertTxRecord(5, 0, Tuple{uint32(1), "Toy Story", "Adventure"})
 //	rec.TxMin = 5   (inserted by tx=5)
 //	rec.TxMax = 0   (alive)
 //	rec.CID = 0     (first command)
 //	rec.Data = [1, "Toy Story", "Adventure"]
-func Insert(txId uint64, cid uint32, data Tuple) TxRecord {
+func InsertTxRecord(txId uint64, cid uint32, data Tuple) TxRecord {
 	return TxRecord{
 		TxMin: txId,
 		TxMax: 0,
@@ -348,20 +348,20 @@ func Insert(txId uint64, cid uint32, data Tuple) TxRecord {
 	}
 }
 
-// Delete marks a TxRecord as deleted by setting TxMax.
+// MarkDeleted marks a TxRecord as deleted by setting TxMax.
 //
 // Example:
 //
 //	old := TxRecord{TxMin: 5, TxMax: 0, CID: 0, Data: [...]}
-//	deleted := Delete(old, 7)
+//	deleted := MarkDeleted(old, 7)
 //	deleted.TxMin = 5   (unchanged)
 //	deleted.TxMax = 7   (deleted by tx=7)
-func Delete(record TxRecord, txId uint64) TxRecord {
+func MarkDeleted(record TxRecord, txId uint64) TxRecord {
 	record.TxMax = txId
 	return record
 }
 
-// Update marks the old record as deleted and returns a new version.
+// UpdateRecord marks old as deleted and returns old + new version.
 //
 // Returns two TxRecords:
 //   - old: TxMax = txId (marked as deleted)
@@ -371,11 +371,11 @@ func Delete(record TxRecord, txId uint64) TxRecord {
 //
 //	old := TxRecord{TxMin: 5, TxMax: 0, Data: ["Toy Story"]}
 //	newVersion := Tuple{uint32(1), "Toy Story (Remastered)", "Adventure"}
-//	oldRecord, newRecord := Update(old, 7, 0, newVersion)
+//	oldRecord, newRecord := UpdateRecord(old, 7, 0, newVersion)
 //	oldRecord.TxMax = 7   (deleted by tx=7)
 //	newRecord.TxMin = 7   (inserted by tx=7)
 //	newRecord.TxMax = 0   (alive)
-func Update(old TxRecord, txId uint64, cid uint32, newData Tuple) (oldRecord, newRecord TxRecord) {
+func UpdateRecord(old TxRecord, txId uint64, cid uint32, newData Tuple) (oldRecord, newRecord TxRecord) {
 	old.TxMax = txId
 	new := TxRecord{
 		TxMin: txId,
