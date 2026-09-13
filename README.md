@@ -57,7 +57,7 @@ database/
 ├── storage/              # Pages, records, file I/O
 ├── tx/                   # Transaction management, commit log
 ├── btree/                # B+ tree index
-├── learn/                # Integration tests
+├── learn/                # Entry point — run and test things here
 ├── movies.csv            # Sample data (27K movies)
 └── go.mod
 ```
@@ -68,7 +68,7 @@ database/
 # Unit tests (storage, executors, btree, tx)
 go test ./...
 
-# Integration tests (learn/)
+# Learn — run and step through code
 go test ./learn/... -v
 ```
 
