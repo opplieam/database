@@ -2,6 +2,10 @@
 
 A simple DBMS built from scratch in Go. Not meant for production — only for learning how databases work internally.
 
+## Main Resource
+
+- **PostgreSQL Internals** — https://www.interdb.jp/pg/
+
 ## What You'll Learn
 
 ### Query Execution (Volcano Model)
@@ -163,3 +167,13 @@ recB.Visible(3, clog) // false
 │ Data     [24-..] (N bytes)  tuple data  │
 └─────────────────────────────────────────┘
 ```
+
+## TODO
+
+- [ ] Refactor all tests + `cmd/main.go` into proper `_test.go` files
+- [ ] JOIN operators (Nested Loop, Hash Join, Sort-Merge Join)
+- [ ] Integrate transactions into executors (automatic clog logging)
+- [ ] Buffer Pool (LRU cache, page eviction, flush clog/memory to disk)
+- [ ] Write-Ahead Logging (WAL)
+- [ ] Locking (row-level locks, gap locks)
+- [ ] VACUUM (clean up dead tuples)
