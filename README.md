@@ -177,3 +177,4 @@ recB.Visible(3, clog) // false
 - [ ] Write-Ahead Logging (WAL)
 - [ ] Locking (row-level locks, gap locks)
 - [ ] VACUUM (clean up dead tuples)
+- [ ] xip_list (snapshot of in-progress transactions)
