@@ -20,6 +20,17 @@ How databases speed up lookups:
 - **Delete** — Borrow/merge nodes to keep the tree balanced
 - **Persistence** — Save/load tree to/from disk
 
+### MVCC (Multi-Version Concurrency Control)
+How databases handle concurrent reads and writes:
+- **Versioned records** — Each record has TxMin (creator), TxMax (deleter), CID (command id)
+- **Visibility rules** — Determine which version a transaction can see
+- **Commit log (clog)** — Track which transactions committed/aborted
+- **Snapshot isolation** — Each transaction sees a consistent snapshot of data
+
+### Isolation Levels
+- **Repeatable Read** — Snapshot taken at transaction start, all statements see same data
+- **Read Committed** — Snapshot taken at each statement, may see different data
+
 ### Query Operators
 Each operator is a small, composable unit:
 
@@ -42,6 +53,7 @@ database/
 ├── cmd/main.go           # Integration test
 ├── executors/            # Query operators
 ├── storage/              # Pages, records, file I/O
+├── tx/                   # Transaction management, commit log
 ├── btree/                # B+ tree index
 ├── movies.csv            # Sample data (27K movies)
 └── go.mod
@@ -72,6 +84,33 @@ limited := executors.NewLimit(projected, 5)
 
 results, _ := executor.Run(limited)
 // → ["Toy Story (1995)", "Jumanji (1995)", ...]
+```
+
+## MVCC Example
+
+```go
+// Create commit log
+clog, _ := tx.OpenCommitLog("clog.data")
+defer clog.Close()
+
+// tx=1: INSERT A, COMMIT
+recA := storage.Insert(1, 0, storage.Tuple{"A"})
+clog.LogCommit(1)
+
+// tx=2: INSERT B (NOT committed)
+recB := storage.Insert(2, 0, storage.Tuple{"B"})
+// clog.LogCommit(2) — not committed!
+
+// tx=1 sees [A] (committed before tx=1 started)
+recA.Visible(1, clog) // true
+
+// tx=2 sees [A, B] (A committed, B is own change)
+recA.Visible(2, clog) // true
+recB.Visible(2, clog) // true
+
+// tx=3 sees [A] (B not committed)
+recA.Visible(3, clog) // true
+recB.Visible(3, clog) // false
 ```
 
 ## On-Disk Format
@@ -109,4 +148,18 @@ results, _ := executor.Run(limited)
 [4096 bytes] page 0
 [4096 bytes] page 1
 ...
+```
+
+## TxRecord Layout
+
+```
+┌─────────────────────────────────────────┐
+│ TxRecord (versioned record)             │
+├─────────────────────────────────────────┤
+│ TxMin    [0-7]   (8 bytes)  creator tx  │
+│ TxMax    [8-15]  (8 bytes)  deleter tx  │
+│ CID      [16-19] (4 bytes)  command id  │
+│ DataLen  [20-23] (4 bytes)  data length │
+│ Data     [24-..] (N bytes)  tuple data  │
+└─────────────────────────────────────────┘
 ```

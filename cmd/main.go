@@ -9,6 +9,7 @@ import (
 	"database/btree"
 	"database/executors"
 	"database/storage"
+	"database/tx"
 )
 
 func main() {
@@ -187,6 +188,124 @@ func main() {
 	if val, ok := loadedTree.Search(1); ok {
 		fmt.Printf("    Search(1) on loaded tree: %v\n", val[1])
 	}
+	fmt.Println()
+
+	// Step 11: Transaction lifecycle demo
+	fmt.Println("11. Transaction lifecycle...")
+	mgr := tx.NewTxManager()
+
+	// begin two transactions
+	tx1 := mgr.Begin(tx.RepeatableRead)
+	tx2 := mgr.Begin(tx.RepeatableRead)
+	fmt.Printf("    tx1 id=%d, tx2 id=%d\n", tx1.Id(), tx2.Id())
+	fmt.Printf("    tx1 status=%v, tx2 status=%v\n", tx1.Status(), tx2.Status())
+
+	// tx1 does two commands
+	cid0 := tx1.NextCID()
+	cid1 := tx1.NextCID()
+	fmt.Printf("    tx1 command 0: cid=%d\n", cid0)
+	fmt.Printf("    tx1 command 1: cid=%d\n", cid1)
+
+	// commit tx1
+	mgr.Commit(tx1)
+	fmt.Printf("    after commit: tx1 status=%v, tx1 active=%v\n", tx1.Status(), mgr.IsActive(tx1.Id()))
+
+	// rollback tx2
+	mgr.Rollback(tx2)
+	fmt.Printf("    after rollback: tx2 status=%v, tx2 active=%v\n", tx2.Status(), mgr.IsActive(tx2.Id()))
+	fmt.Println()
+
+	// Step 12: Snapshot Isolation (Repeatable Read)
+	fmt.Println("12. Snapshot Isolation (Repeatable Read)...")
+	fmt.Println()
+	fmt.Println("    Core lesson: Each transaction sees only COMMITTED data")
+	fmt.Println("    from before it started. Uncommitted changes are invisible.")
+	fmt.Println()
+
+	// Create commit log
+	clogFile := "clog.data"
+	clog, err := tx.OpenCommitLog(clogFile)
+	if err != nil {
+		fatal("open clog", err)
+	}
+	defer clog.Close()
+	defer os.Remove(clogFile)
+
+	// Step 1: tx=1 inserts A and commits
+	recA := storage.Insert(1, 0, storage.Tuple{"A"})
+	clog.LogCommit(1)
+	fmt.Println("    Step 1: tx=1 INSERT A, COMMIT")
+
+	// Step 2: tx=2 starts (sees A), inserts B, but does NOT commit
+	recB := storage.Insert(2, 0, storage.Tuple{"B"})
+	// NOT committed: clog.LogCommit(2)
+	fmt.Println("    Step 2: tx=2 INSERT B (NOT committed)")
+
+	// Step 3: tx=3 starts
+	fmt.Println("    Step 3: tx=3 starts")
+	fmt.Println()
+
+	allRecords := []storage.TxRecord{recA, recB}
+
+	// Show what each transaction sees (Repeatable Read)
+	fmt.Println("    What each transaction sees (Repeatable Read):")
+	for _, txId := range []uint64{1, 2, 3} {
+		var visible []string
+		for _, r := range allRecords {
+			if r.Visible(txId, clog) {
+				visible = append(visible, r.Data[0].(string))
+			}
+		}
+		fmt.Printf("      tx=%d: %v\n", txId, visible)
+	}
+	fmt.Println()
+	fmt.Println("    Key insight:")
+	fmt.Println("      - tx=1 sees [A] (only A existed when tx=1 started)")
+	fmt.Println("      - tx=2 sees [A, B] (A committed, B inserted by tx=2)")
+	fmt.Println("      - tx=3 sees [A] (A committed, but B NOT committed by tx=2)")
+	fmt.Println()
+
+	// Step 13: Snapshot Isolation (Read Committed)
+	fmt.Println("13. Snapshot Isolation (Read Committed)...")
+	fmt.Println()
+	fmt.Println("    Core lesson: Each STATEMENT sees only COMMITTED data")
+	fmt.Println("    from before it started. New snapshot per statement.")
+	fmt.Println()
+
+	// Create new records for Read Committed demo
+	recC := storage.Insert(10, 0, storage.Tuple{"C"})
+	clog.LogCommit(10)
+	fmt.Println("    Step 1: tx=10 INSERT C, COMMIT")
+
+	// tx=11: first statement (sees C)
+	stmt1 := uint64(100) // simulated statement ID
+	var visible1 []string
+	for _, r := range []storage.TxRecord{recC} {
+		if r.Visible(stmt1, clog) {
+			visible1 = append(visible1, r.Data[0].(string))
+		}
+	}
+	fmt.Printf("    Step 2: tx=11 stmt1 SELECT → sees %v\n", visible1)
+
+	// tx=12: inserts D and commits
+	recD := storage.Insert(12, 0, storage.Tuple{"D"})
+	clog.LogCommit(12)
+	fmt.Println("    Step 3: tx=12 INSERT D, COMMIT")
+
+	// tx=11: second statement (new snapshot, sees C and D)
+	stmt2 := uint64(101) // new statement ID
+	var visible2 []string
+	for _, r := range []storage.TxRecord{recC, recD} {
+		if r.Visible(stmt2, clog) {
+			visible2 = append(visible2, r.Data[0].(string))
+		}
+	}
+	fmt.Printf("    Step 4: tx=11 stmt2 SELECT → sees %v\n", visible2)
+	fmt.Println()
+	fmt.Println("    Key insight:")
+	fmt.Println("      - stmt1 sees [C] (only C committed before stmt1)")
+	fmt.Println("      - stmt2 sees [C, D] (D committed before stmt2)")
+	fmt.Println("      - In Repeatable Read, stmt2 would still see only [C]")
 	fmt.Println()
 
 	fmt.Println("=== ALL TESTS PASSED ===")

@@ -1,12 +1,39 @@
 package storage
 
 import (
+	"database/tx"
 	"encoding/binary"
 	"errors"
+	"fmt"
 )
 
 // Tuple represents a single row as a slice of values.
 type Tuple = []any
+
+// TxRecord wraps a Tuple with MVCC version metadata.
+//
+// Fields:
+//
+//	TxMin - transaction that created this version (INSERT)
+//	TxMax - transaction that deleted/updated this version (0 = alive)
+//	CID   - command id within the transaction (0, 1, 2, ...)
+//
+// Example: transaction 5 executes three INSERTs
+//
+//	INSERT INTO movies VALUES (1, 'Toy Story')    → TxRecord{TxMin:5, TxMax:0, CID:0}
+//	INSERT INTO movies VALUES (2, 'Jumanji')      → TxRecord{TxMin:5, TxMax:0, CID:1}
+//	INSERT INTO movies VALUES (3, 'Heat')         → TxRecord{TxMin:5, TxMax:0, CID:2}
+//
+// Example: UPDATE movie 1 at transaction 7
+//
+//	Old version: TxRecord{TxMin:5, TxMax:7, CID:0}  ← marked as deleted
+//	New version: TxRecord{TxMin:7, TxMax:0, CID:0}  ← new insert
+type TxRecord struct {
+	TxMin uint64
+	TxMax uint64  // 0 means alive
+	CID   uint32  // command id within transaction
+	Data  Tuple
+}
 
 // EncodeRecord encodes a movie record as bytes:
 //
@@ -75,4 +102,286 @@ func DecodeRecord(data []byte) (movieId uint32, title, genres string, err error)
 	genres = string(data[offset : offset+genresLen])
 
 	return movieId, title, genres, nil
+}
+
+// encodeTuple encodes a Tuple to bytes using type tags.
+//
+// Format per value:
+//
+//	[1 byte]  type tag: 1=uint32, 2=string
+//	[N bytes] data
+//
+// Examples:
+//
+//	Tuple{uint32(42), "hello"}
+//	  → [1][42,0,0,0][2][5][h,e,l,l,o]
+//	  = 1 + 4 + 1 + 1 + 5 = 12 bytes
+//
+//	Tuple{"Toy Story", uint32(1995)}
+//	  → [2][9][T,o,y, ,S,t,o,r,y][1][1995,7,0,0]
+//	  = 1 + 1 + 9 + 1 + 4 = 16 bytes
+func encodeTuple(t Tuple) []byte {
+	var buf []byte
+	for _, v := range t {
+		switch val := v.(type) {
+		case uint32:
+			buf = append(buf, 1) // type tag for uint32
+			b := make([]byte, 4)
+			binary.LittleEndian.PutUint32(b, val)
+			buf = append(buf, b...)
+		case string:
+			buf = append(buf, 2) // type tag for string
+			b := make([]byte, 2+len(val))
+			binary.LittleEndian.PutUint16(b, uint16(len(val)))
+			copy(b[2:], val)
+			buf = append(buf, b...)
+		}
+	}
+	return buf
+}
+
+// decodeTuple decodes a Tuple from bytes.
+func decodeTuple(data []byte) (Tuple, error) {
+	var t Tuple
+	offset := 0
+	for offset < len(data) {
+		if offset >= len(data) {
+			break
+		}
+		tag := data[offset]
+		offset++
+		switch tag {
+		case 1: // uint32
+			if offset+4 > len(data) {
+				return nil, errors.New("insufficient data for uint32")
+			}
+			val := binary.LittleEndian.Uint32(data[offset:])
+			t = append(t, val)
+			offset += 4
+		case 2: // string
+			if offset+2 > len(data) {
+				return nil, errors.New("insufficient data for string length")
+			}
+			strLen := binary.LittleEndian.Uint16(data[offset:])
+			offset += 2
+			if offset+int(strLen) > len(data) {
+				return nil, errors.New("insufficient data for string")
+			}
+			t = append(t, string(data[offset:offset+int(strLen)]))
+			offset += int(strLen)
+		default:
+			return nil, fmt.Errorf("unknown type tag: %d", tag)
+		}
+	}
+	return t, nil
+}
+
+// EncodeTxRecord serializes a TxRecord to bytes.
+//
+// Layout:
+//
+//	[0-7]   TxMin       (8 bytes, little-endian uint64)
+//	[8-15]  TxMax       (8 bytes, little-endian uint64)
+//	[16-19] CID         (4 bytes, little-endian uint32)
+//	[20-23] Data length (4 bytes, little-endian uint32)
+//	[24-..] Data        (N bytes, type-tagged tuple)
+//
+// Example: TxRecord{TxMin:1, TxMax:0, CID:0, Data: [uint32(42), "hello"]}
+//
+//	Total size = 24 + 12 = 36 bytes
+//	[0-7]   = 0x01 0x00 0x00 0x00 0x00 0x00 0x00 0x00  (TxMin=1)
+//	[8-15]  = 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00  (TxMax=0)
+//	[16-19] = 0x00 0x00 0x00 0x00                       (CID=0)
+//	[20-23] = 0x0C 0x00 0x00 0x00                       (Data length=12)
+//	[24-35] = encoded tuple data
+func EncodeTxRecord(r TxRecord) []byte {
+	dataBytes := encodeTuple(r.Data)
+	buf := make([]byte, 24+len(dataBytes))
+
+	binary.LittleEndian.PutUint64(buf[0:], r.TxMin)
+	binary.LittleEndian.PutUint64(buf[8:], r.TxMax)
+	binary.LittleEndian.PutUint32(buf[16:], r.CID)
+	binary.LittleEndian.PutUint32(buf[20:], uint32(len(dataBytes)))
+	copy(buf[24:], dataBytes)
+
+	return buf
+}
+
+// DecodeTxRecord deserializes a TxRecord from bytes.
+func DecodeTxRecord(buf []byte) (TxRecord, error) {
+	if len(buf) < 24 {
+		return TxRecord{}, errors.New("buffer too short for TxRecord header")
+	}
+
+	r := TxRecord{}
+	r.TxMin = binary.LittleEndian.Uint64(buf[0:])
+	r.TxMax = binary.LittleEndian.Uint64(buf[8:])
+	r.CID = binary.LittleEndian.Uint32(buf[16:])
+	dataLen := binary.LittleEndian.Uint32(buf[20:])
+
+	if len(buf) < 24+int(dataLen) {
+		return TxRecord{}, errors.New("buffer too short for Data")
+	}
+
+	var err error
+	r.Data, err = decodeTuple(buf[24 : 24+int(dataLen)])
+	if err != nil {
+		return TxRecord{}, err
+	}
+
+	return r, nil
+}
+
+// Visible determines if this record version is visible to a transaction.
+//
+// This function works with any isolation level.
+// The caller determines the snapshot ID:
+//   - REPEATABLE READ: pass tx.Id() (same snapshot for entire transaction)
+//   - READ COMMITTED: pass tx.NewStatement() (new snapshot per statement)
+//
+// The visibility logic is the same for both levels.
+// What changes is what you pass as currentTxId.
+//
+// Visibility rules (simplified from PostgreSQL):
+//
+// A record is VISIBLE if:
+//   1. The creator committed (or it's my own uncommitted change)
+//   2. The creator committed before my snapshot
+//   3. It's not deleted, OR the delete hasn't happened yet
+//
+// A record is INVISIBLE if:
+//   - The creator hasn't committed (and it's not mine)
+//   - The creator committed after my snapshot
+//   - It was deleted before my snapshot
+//
+// Key insight: A transaction can always see its own uncommitted changes.
+//
+// Summary table:
+//
+//	Creator    Creator      Deleter     Deleter     Visible
+//	committed? before snap? committed?  after snap?  to me?
+//	────────── ──────────── ─────────── ──────────── ───────
+//	yes        yes          -           -            yes
+//	yes        no           -           -            no
+//	no (mine)  -            -           -            yes
+//	no (other) -            -           -            no
+//	yes        yes          no          -            yes
+//	yes        yes          yes         yes          yes
+//	yes        yes          yes         no           no
+//
+// Note: The logic above is the same for all isolation levels.
+// What changes is what "before snap?" means:
+//
+//	REPEATABLE READ:
+//	  - snapshot = tx.Id() (fixed at transaction start)
+//	  - all statements see the same snapshot
+//
+//	READ COMMITTED:
+//	  - snapshot = tx.NewStatement() (new per statement)
+//	  - each statement may see different data
+//
+// Examples:
+//
+//	TxRecord{TxMin: 1, TxMax: 0}, clog has tx=1 committed
+//	  Visible(1, clog) → true   (created by tx=1, not deleted)
+//	  Visible(2, clog) → true   (created before tx=2, not deleted)
+//
+//	TxRecord{TxMin: 1, TxMax: 3}, clog has tx=1 and tx=3 committed
+//	  Visible(1, clog) → true   (created by tx=1, deleted after tx=1)
+//	  Visible(2, clog) → true   (created before tx=2, deleted after tx=2)
+//	  Visible(3, clog) → false  (deleted by this transaction)
+//	  Visible(4, clog) → false  (deleted before this transaction)
+//
+//	TxRecord{TxMin: 2, TxMax: 0}, clog has tx=2 NOT committed
+//	  Visible(1, clog) → false  (insert never happened, not my tx)
+//	  Visible(2, clog) → true   (my own uncommitted change!)
+func (r TxRecord) Visible(currentTxId uint64, clog *tx.CommitLog) bool {
+	// Is the creator's transaction committed?
+	// Exception: I can always see my own changes, even if uncommitted.
+	if r.TxMin != currentTxId && !clog.IsCommitted(r.TxMin) {
+		return false
+	}
+
+	// Was the record created before or at my snapshot?
+	// If created after, I shouldn't see it.
+	if r.TxMin > currentTxId {
+		return false
+	}
+
+	// Is the record alive (not deleted)?
+	if r.TxMax == 0 {
+		return true
+	}
+
+	// Is the delete committed?
+	// If not committed, the record is still visible.
+	if !clog.IsCommitted(r.TxMax) {
+		return true
+	}
+
+	// Was the delete after my snapshot?
+	// If yes, I still see the record (my snapshot predates the delete).
+	if r.TxMax > currentTxId {
+		return true
+	}
+
+	// The delete happened before or at my snapshot.
+	// The record is gone from my view.
+	return false
+}
+
+// Insert creates a new TxRecord for insertion.
+//
+// Example:
+//
+//	rec := Insert(5, 0, Tuple{uint32(1), "Toy Story", "Adventure"})
+//	rec.TxMin = 5   (inserted by tx=5)
+//	rec.TxMax = 0   (alive)
+//	rec.CID = 0     (first command)
+//	rec.Data = [1, "Toy Story", "Adventure"]
+func Insert(txId uint64, cid uint32, data Tuple) TxRecord {
+	return TxRecord{
+		TxMin: txId,
+		TxMax: 0,
+		CID:   cid,
+		Data:  data,
+	}
+}
+
+// Delete marks a TxRecord as deleted by setting TxMax.
+//
+// Example:
+//
+//	old := TxRecord{TxMin: 5, TxMax: 0, CID: 0, Data: [...]}
+//	deleted := Delete(old, 7)
+//	deleted.TxMin = 5   (unchanged)
+//	deleted.TxMax = 7   (deleted by tx=7)
+func Delete(record TxRecord, txId uint64) TxRecord {
+	record.TxMax = txId
+	return record
+}
+
+// Update marks the old record as deleted and returns a new version.
+//
+// Returns two TxRecords:
+//   - old: TxMax = txId (marked as deleted)
+//   - new: TxMin = txId, TxMax = 0 (fresh insert)
+//
+// Example:
+//
+//	old := TxRecord{TxMin: 5, TxMax: 0, Data: ["Toy Story"]}
+//	newVersion := Tuple{uint32(1), "Toy Story (Remastered)", "Adventure"}
+//	oldRecord, newRecord := Update(old, 7, 0, newVersion)
+//	oldRecord.TxMax = 7   (deleted by tx=7)
+//	newRecord.TxMin = 7   (inserted by tx=7)
+//	newRecord.TxMax = 0   (alive)
+func Update(old TxRecord, txId uint64, cid uint32, newData Tuple) (oldRecord, newRecord TxRecord) {
+	old.TxMax = txId
+	new := TxRecord{
+		TxMin: txId,
+		TxMax: 0,
+		CID:   cid,
+		Data:  newData,
+	}
+	return old, new
 }
