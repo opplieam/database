@@ -27,7 +27,7 @@ func (s *HeapSuite) TearDownTest() {
 
 func (s *HeapSuite) TestHeapFileScanIO() {
 	s.T().Logf("Step 1: Open HeapFileScan")
-	scan, err := executors.NewHeapFileScan(s.filename)
+	scan, err := executors.NewHeapFileScan(s.filename, nil)
 	s.Require().NoError(err)
 	defer scan.Close()
 

@@ -239,71 +239,49 @@ func DecodeTxRecord(buf []byte) (TxRecord, error) {
 //   - REPEATABLE READ: pass tx.Id() (same snapshot for entire transaction)
 //   - READ COMMITTED: pass tx.NewStatement() (new snapshot per statement)
 //
-// The visibility logic is the same for both levels.
-// What changes is what you pass as currentTxId.
+// The xip_list contains transaction IDs that were in-progress at snapshot time.
+// If the creator is in the xip_list, the record is invisible.
 //
 // Visibility rules (simplified from PostgreSQL):
 //
 // A record is VISIBLE if:
-//   1. The creator committed (or it's my own uncommitted change)
-//   2. The creator committed before my snapshot
-//   3. It's not deleted, OR the delete hasn't happened yet
+//   1. It's my own uncommitted change
+//   2. The creator is NOT in my xip_list (was not in-progress at snapshot)
+//   3. The creator committed before my snapshot
+//   4. It's not deleted, OR the delete hasn't happened yet
 //
 // A record is INVISIBLE if:
+//   - The creator is in my xip_list (was in-progress at snapshot)
 //   - The creator hasn't committed (and it's not mine)
 //   - The creator committed after my snapshot
 //   - It was deleted before my snapshot
 //
-// Key insight: A transaction can always see its own uncommitted changes.
-//
-// Summary table:
-//
-//	Creator    Creator      Deleter     Deleter     Visible
-//	committed? before snap? committed?  after snap?  to me?
-//	────────── ──────────── ─────────── ──────────── ───────
-//	yes        yes          -           -            yes
-//	yes        no           -           -            no
-//	no (mine)  -            -           -            yes
-//	no (other) -            -           -            no
-//	yes        yes          no          -            yes
-//	yes        yes          yes         yes          yes
-//	yes        yes          yes         no           no
-//
-// Note: The logic above is the same for all isolation levels.
-// What changes is what "before snap?" means:
-//
-//	REPEATABLE READ:
-//	  - snapshot = tx.Id() (fixed at transaction start)
-//	  - all statements see the same snapshot
-//
-//	READ COMMITTED:
-//	  - snapshot = tx.NewStatement() (new per statement)
-//	  - each statement may see different data
-//
 // Examples:
 //
-//	TxRecord{TxMin: 1, TxMax: 0}, clog has tx=1 committed
-//	  Visible(1, clog) → true   (created by tx=1, not deleted)
-//	  Visible(2, clog) → true   (created before tx=2, not deleted)
+//	TxRecord{TxMin: 1, TxMax: 0}, xipList={}, clog has tx=1 committed
+//	  Visible(1, clog, xipList) → true   (my own change)
+//	  Visible(2, clog, xipList) → true   (created before tx=2, not deleted)
 //
-//	TxRecord{TxMin: 1, TxMax: 3}, clog has tx=1 and tx=3 committed
-//	  Visible(1, clog) → true   (created by tx=1, deleted after tx=1)
-//	  Visible(2, clog) → true   (created before tx=2, deleted after tx=2)
-//	  Visible(3, clog) → false  (deleted by this transaction)
-//	  Visible(4, clog) → false  (deleted before this transaction)
-//
-//	TxRecord{TxMin: 2, TxMax: 0}, clog has tx=2 NOT committed
-//	  Visible(1, clog) → false  (insert never happened, not my tx)
-//	  Visible(2, clog) → true   (my own uncommitted change!)
-func (r TxRecord) Visible(currentTxId uint64, clog *tx.CommitLog) bool {
-	// Is the creator's transaction committed?
-	// Exception: I can always see my own changes, even if uncommitted.
-	if r.TxMin != currentTxId && !clog.IsCommitted(r.TxMin) {
+//	TxRecord{TxMin: 1, TxMax: 0}, xipList={1: true}, clog has tx=1 committed
+//	  Visible(1, clog, xipList) → true   (my own change)
+//	  Visible(2, clog, xipList) → false  (tx=1 was in-progress at snapshot)
+func (r TxRecord) Visible(currentTxId uint64, clog *tx.CommitLog, xipList map[uint64]bool) bool {
+	// My own changes are always visible
+	if r.TxMin == currentTxId {
+		return true
+	}
+
+	// If creator is in my xip_list → was in-progress at my snapshot → invisible
+	if xipList[r.TxMin] {
+		return false
+	}
+
+	// Is the creator committed?
+	if !clog.IsCommitted(r.TxMin) {
 		return false
 	}
 
 	// Was the record created before or at my snapshot?
-	// If created after, I shouldn't see it.
 	if r.TxMin > currentTxId {
 		return false
 	}
@@ -314,19 +292,16 @@ func (r TxRecord) Visible(currentTxId uint64, clog *tx.CommitLog) bool {
 	}
 
 	// Is the delete committed?
-	// If not committed, the record is still visible.
 	if !clog.IsCommitted(r.TxMax) {
 		return true
 	}
 
 	// Was the delete after my snapshot?
-	// If yes, I still see the record (my snapshot predates the delete).
 	if r.TxMax > currentTxId {
 		return true
 	}
 
 	// The delete happened before or at my snapshot.
-	// The record is gone from my view.
 	return false
 }
 

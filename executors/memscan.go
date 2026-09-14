@@ -37,13 +37,14 @@ import (
 //   idx=3 < len=3 → false
 //   return nil, io.EOF
 type MemoryScan struct {
-	table []storage.Tuple
-	idx   int
+	table   []storage.Tuple
+	xipList map[uint64]bool
+	idx     int
 }
 
 // NewMemoryScan creates a new MemoryScan executor node.
-func NewMemoryScan(table []storage.Tuple) *MemoryScan {
-	return &MemoryScan{table: table}
+func NewMemoryScan(table []storage.Tuple, xipList map[uint64]bool) *MemoryScan {
+	return &MemoryScan{table: table, xipList: xipList}
 }
 
 // Next returns the next tuple from the in-memory table, or io.EOF when exhausted.

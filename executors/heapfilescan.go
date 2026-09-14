@@ -46,10 +46,11 @@ type HeapFileScan struct {
 	page       *storage.Page
 	recordIdx  int
 	done       bool
+	xipList    map[uint64]bool
 }
 
 // NewHeapFileScan opens a binary file and reads the record count from the first 4 bytes.
-func NewHeapFileScan(path string) (*HeapFileScan, error) {
+func NewHeapFileScan(path string, xipList map[uint64]bool) (*HeapFileScan, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -66,6 +67,7 @@ func NewHeapFileScan(path string) (*HeapFileScan, error) {
 	return &HeapFileScan{
 		file:      f,
 		pageCount: count,
+		xipList:   xipList,
 	}, nil
 }
 

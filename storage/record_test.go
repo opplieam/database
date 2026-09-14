@@ -88,10 +88,10 @@ func TestVisibleOwnTx(t *testing.T) {
 
 	// tx=1 can see its own uncommitted change
 	rec := TxRecord{TxMin: 1, TxMax: 0, CID: 0, Data: Tuple{"A"}}
-	assert.True(t, rec.Visible(1, clog), "tx=1 should see own uncommitted change")
+	assert.True(t, rec.Visible(1, clog, nil), "tx=1 should see own uncommitted change")
 
 	// tx=2 cannot see tx=1's uncommitted change
-	assert.False(t, rec.Visible(2, clog), "tx=2 should not see tx=1's uncommitted change")
+	assert.False(t, rec.Visible(2, clog, nil), "tx=2 should not see tx=1's uncommitted change")
 }
 
 func TestVisibleCommitted(t *testing.T) {
@@ -102,10 +102,10 @@ func TestVisibleCommitted(t *testing.T) {
 	clog.LogCommit(1)
 
 	// tx=2 should see committed record
-	assert.True(t, rec.Visible(2, clog), "tx=2 should see tx=1's committed record")
+	assert.True(t, rec.Visible(2, clog, nil), "tx=2 should see tx=1's committed record")
 
 	// tx=1 should also see it
-	assert.True(t, rec.Visible(1, clog), "tx=1 should see own committed record")
+	assert.True(t, rec.Visible(1, clog, nil), "tx=1 should see own committed record")
 }
 
 func TestVisibleDeleted(t *testing.T) {
@@ -120,10 +120,10 @@ func TestVisibleDeleted(t *testing.T) {
 	clog.LogCommit(2)
 
 	// tx=3 should not see deleted record
-	assert.False(t, deleted.Visible(3, clog), "tx=3 should not see deleted record")
+	assert.False(t, deleted.Visible(3, clog, nil), "tx=3 should not see deleted record")
 
 	// tx=1 (before delete) should still see it
-	assert.True(t, deleted.Visible(1, clog), "tx=1 should see record (delete happened after)")
+	assert.True(t, deleted.Visible(1, clog, nil), "tx=1 should see record (delete happened after)")
 }
 
 func TestInsertTxRecord(t *testing.T) {

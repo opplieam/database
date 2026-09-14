@@ -28,7 +28,7 @@ func (s *ExecutorSuite) TearDownTest() {
 
 func (s *ExecutorSuite) TestExecutorComposition() {
 	s.T().Logf("Step 1: Create HeapFileScan")
-	scan, err := executors.NewHeapFileScan(s.filename)
+	scan, err := executors.NewHeapFileScan(s.filename, nil)
 	s.Require().NoError(err)
 	defer scan.Close()
 

@@ -4,9 +4,9 @@ package tx
 type TxStatus int
 
 const (
-	TxStatusActive     TxStatus = iota // in progress
-	TxStatusCommitted                  // successfully finished
-	TxStatusAborted                    // rolled back
+	TxStatusActive    TxStatus = iota // in progress
+	TxStatusCommitted                 // successfully finished
+	TxStatusAborted                   // rolled back
 )
 
 // IsolationLevel determines how transactions see each other's changes.
@@ -37,6 +37,7 @@ type Transaction struct {
 	cid            uint32 // command id counter (0, 1, 2, ...)
 	stmtCounter    uint64 // statement counter for ReadCommitted
 	isolationLevel IsolationLevel
+	xipList        map[uint64]bool // in-progress txs at snapshot time
 }
 
 // NewTransaction creates a new active transaction with the given id and isolation level.
@@ -69,8 +70,16 @@ func (t *Transaction) NextCID() uint32 {
 
 // NewStatement returns a new snapshot ID for ReadCommitted isolation.
 // Each call returns a unique, increasing ID.
-func (t *Transaction) NewStatement() uint64 {
+// It also refreshes xip_list.
+//
+// NOTE: This is only for ReadCommitted!
+// RepeatableRead does NOT call NewStatement.
+// RepeatableRead uses the fixed xip_list from Begin().
+func (t *Transaction) NewStatement(mgr *TxManager) uint64 {
 	t.stmtCounter++
+	if t.isolationLevel == ReadCommitted {
+		t.xipList = mgr.ActiveTxIds(t.id)
+	}
 	return t.stmtCounter
 }
 
@@ -78,9 +87,9 @@ func (t *Transaction) NewStatement() uint64 {
 //
 // RepeatableRead: returns tx.Id() (same snapshot for entire transaction)
 // ReadCommitted: returns tx.NewStatement() (new snapshot per statement)
-func (t *Transaction) SnapshotId() uint64 {
+func (t *Transaction) SnapshotId(mgr *TxManager) uint64 {
 	if t.isolationLevel == ReadCommitted {
-		return t.NewStatement()
+		return t.NewStatement(mgr)
 	}
 	return t.id
 }
@@ -93,6 +102,11 @@ func (t *Transaction) Commit() {
 // Rollback marks the transaction as aborted.
 func (t *Transaction) Rollback() {
 	t.status = TxStatusAborted
+}
+
+// XipList returns the transaction's xip_list.
+func (t *Transaction) XipList() map[uint64]bool {
+	return t.xipList
 }
 
 // TxManager manages transaction creation and tracks active transactions.
@@ -121,6 +135,13 @@ func NewTxManager() *TxManager {
 // Begin starts a new transaction with the given isolation level.
 func (m *TxManager) Begin(isolationLevel IsolationLevel) *Transaction {
 	tx := NewTransaction(m.nextId, isolationLevel)
+
+	// Capture in-progress transactions at snapshot time
+	tx.xipList = make(map[uint64]bool)
+	for id := range m.active {
+		tx.xipList[id] = true
+	}
+
 	m.active[m.nextId] = tx
 	m.nextId++
 	return tx
@@ -142,4 +163,15 @@ func (m *TxManager) Rollback(tx *Transaction) {
 func (m *TxManager) IsActive(txId uint64) bool {
 	_, ok := m.active[txId]
 	return ok
+}
+
+// ActiveTxIds returns a copy of active transaction IDs, excluding the specified tx.
+func (m *TxManager) ActiveTxIds(excludeTxId uint64) map[uint64]bool {
+	result := make(map[uint64]bool)
+	for id := range m.active {
+		if id != excludeTxId {
+			result[id] = true
+		}
+	}
+	return result
 }

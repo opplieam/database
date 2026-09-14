@@ -9,7 +9,7 @@ import (
 )
 
 func TestProjection(t *testing.T) {
-	scan := NewMemoryScan(testBirds)
+	scan := NewMemoryScan(testBirds, nil)
 	projected := NewProjection(scan, func(t storage.Tuple) storage.Tuple {
 		return storage.Tuple{t[0], t[1]} // code, name only
 	})

@@ -9,7 +9,7 @@ import (
 )
 
 func TestSort(t *testing.T) {
-	scan := NewMemoryScan(testBirds)
+	scan := NewMemoryScan(testBirds, nil)
 	sorted := NewSort(scan, func(t storage.Tuple) any {
 		return t[2] // sort by weight
 	}, true) // descending

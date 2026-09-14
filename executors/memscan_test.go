@@ -7,7 +7,7 @@ import (
 )
 
 func TestMemoryScan(t *testing.T) {
-	scan := NewMemoryScan(testBirds)
+	scan := NewMemoryScan(testBirds, nil)
 	result, err := Run(scan)
 
 	assert.NoError(t, err)

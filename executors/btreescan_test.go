@@ -18,7 +18,7 @@ func TestBTreeScan(t *testing.T) {
 	}
 
 	// Scan all records
-	scan := NewBTreeScan(tree)
+	scan := NewBTreeScan(tree, nil)
 	result, err := Run(scan)
 
 	assert.NoError(t, err)

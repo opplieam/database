@@ -27,14 +27,15 @@ import (
 //   tuple, err = scan.Next()
 //   // tuple = nil, err = io.EOF
 type BTreeScan struct {
-	tree   *btree.BTree
-	leaf   *btree.BTreeNode  // current leaf node
-	idx    int         // index within current leaf
-	done   bool
+	tree    *btree.BTree
+	leaf    *btree.BTreeNode
+	idx     int
+	done    bool
+	xipList map[uint64]bool
 }
 
 // NewBTreeScan creates a new BTreeScan executor node.
-func NewBTreeScan(tree *btree.BTree) *BTreeScan {
+func NewBTreeScan(tree *btree.BTree, xipList map[uint64]bool) *BTreeScan {
 	var leaf *btree.BTreeNode
 	if tree.Root != nil {
 		// find leftmost leaf (start of linked list)
@@ -45,9 +46,10 @@ func NewBTreeScan(tree *btree.BTree) *BTreeScan {
 	}
 
 	return &BTreeScan{
-		tree: tree,
-		leaf: leaf,
-		idx:  0,
+		tree:    tree,
+		leaf:    leaf,
+		idx:     0,
+		xipList: xipList,
 	}
 }
 

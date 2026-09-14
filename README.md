@@ -30,10 +30,11 @@ How databases handle concurrent reads and writes:
 - **Visibility rules** — Determine which version a transaction can see
 - **Commit log (clog)** — Track which transactions committed/aborted
 - **Snapshot isolation** — Each transaction sees a consistent snapshot of data
+- **xip_list** — Snapshot of in-progress transactions at snapshot time (avoids seeing uncommitted changes)
 
 ### Isolation Levels
-- **Repeatable Read** — Snapshot taken at transaction start, all statements see same data
-- **Read Committed** — Snapshot taken at each statement, may see different data
+- **Repeatable Read** — xip_list fixed at transaction start, all statements see same data
+- **Read Committed** — xip_list refreshed at each statement via `NewStatement()`, may see different data
 
 ### Query Operators
 Each operator is a small, composable unit:
@@ -92,28 +93,33 @@ results, _ := executor.Run(limited)
 ## MVCC Example
 
 ```go
-// Create commit log
+// Create commit log and TxManager
 clog, _ := tx.OpenCommitLog("clog.data")
 defer clog.Close()
+mgr := tx.NewTxManager()
 
 // tx=1: INSERT A, COMMIT
-recA := storage.InsertTxRecord(1, 0, storage.Tuple{"A"})
-clog.LogCommit(1)
+tx1 := mgr.Begin(tx.RepeatableRead)
+recA := storage.InsertTxRecord(tx1.Id(), 0, storage.Tuple{"A"})
+mgr.Commit(tx1)
+clog.LogCommit(tx1.Id())
 
 // tx=2: INSERT B (NOT committed)
-recB := storage.InsertTxRecord(2, 0, storage.Tuple{"B"})
-// clog.LogCommit(2) — not committed!
+tx2 := mgr.Begin(tx.RepeatableRead)
+recB := storage.InsertTxRecord(tx2.Id(), 0, storage.Tuple{"B"})
+// not committed!
 
-// tx=1 sees [A] (committed before tx=1 started)
-recA.Visible(1, clog) // true
+// tx=1 sees [A] (committed, empty xipList)
+recA.Visible(tx1.Id(), clog, tx1.XipList()) // true
 
-// tx=2 sees [A, B] (A committed, B is own change)
-recA.Visible(2, clog) // true
-recB.Visible(2, clog) // true
+// tx=2 sees [A, B] (A committed, B is own change, empty xipList)
+recA.Visible(tx2.Id(), clog, tx2.XipList()) // true
+recB.Visible(tx2.Id(), clog, tx2.XipList()) // true
 
-// tx=3 sees [A] (B not committed)
-recA.Visible(3, clog) // true
-recB.Visible(3, clog) // false
+// tx=3 sees [A] (B not committed, empty xipList)
+tx3 := mgr.Begin(tx.RepeatableRead)
+recA.Visible(tx3.Id(), clog, tx3.XipList()) // true
+recB.Visible(tx3.Id(), clog, tx3.XipList()) // false
 ```
 
 ## On-Disk Format
@@ -176,4 +182,4 @@ recB.Visible(3, clog) // false
 - [ ] Write-Ahead Logging (WAL)
 - [ ] Locking (row-level locks, gap locks)
 - [ ] VACUUM (clean up dead tuples)
-- [ ] xip_list (snapshot of in-progress transactions)
+- [x] xip_list (snapshot of in-progress transactions)

@@ -26,7 +26,7 @@ func TestHeapFileScan(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Test 1: Read all records
-	scan, err := NewHeapFileScan(filename)
+	scan, err := NewHeapFileScan(filename, nil)
 	assert.NoError(t, err)
 	defer scan.Close()
 
@@ -39,7 +39,7 @@ func TestHeapFileScan(t *testing.T) {
 	assert.Equal(t, 4, len(result1), "should read all 4 movies")
 
 	// Test 2: Filter by genre
-	scan2, err := NewHeapFileScan(filename)
+	scan2, err := NewHeapFileScan(filename, nil)
 	assert.NoError(t, err)
 	defer scan2.Close()
 
