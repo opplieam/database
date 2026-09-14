@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"database/btree"
+	"database/executors"
 	"database/storage"
 
 	"github.com/stretchr/testify/suite"
@@ -75,6 +76,40 @@ func (s *BTreeSuite) TestPersistence() {
 	s.T().Logf("Range scan loaded tree")
 	keys := loadedTree.RangeScanKeys(3, 7)
 	s.Equal([]int{3, 4, 5, 6, 7}, keys, "loaded tree should support range scan")
+}
+
+func (s *BTreeSuite) TestBTreeScanComposition() {
+	s.T().Logf("Step 1: Create BTreeScan")
+	scan := executors.NewBTreeScan(s.tree, nil)
+
+	s.T().Logf("Step 2: Selection - filter movies with ID > 5")
+	filtered := executors.NewSelection(scan, func(t storage.Tuple) bool {
+		return t[0].(uint32) > 5
+	})
+
+	s.T().Logf("Step 3: Projection - pick title only")
+	projected := executors.NewProjection(filtered, func(t storage.Tuple) storage.Tuple {
+		return storage.Tuple{t[1]}
+	})
+
+	s.T().Logf("Step 4: Limit - first 3 results")
+	limited := executors.NewLimit(projected, 3)
+
+	s.T().Logf("Step 5: Run query")
+	result, err := executors.Run(limited)
+	s.Require().NoError(err)
+
+	s.T().Logf("Step 6: Verify results")
+	s.Equal(3, len(result), "should return 3 movies")
+
+	// Movies with ID > 5: Sudden Death(6), GoldenEye(7), American President(8), Dracula(9), Balto(10)
+	// After limit 3: Sudden Death, GoldenEye, American President
+	expectedTitles := []string{"Sudden Death", "GoldenEye", "American President"}
+	for i, r := range result {
+		title := r[0].(string)
+		s.T().Logf("  - %s", title)
+		s.Equal(expectedTitles[i], title, "movie %d should be %s", i, expectedTitles[i])
+	}
 }
 
 func TestBTreeSuite(t *testing.T) {
