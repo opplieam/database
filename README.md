@@ -176,6 +176,7 @@ recB.Visible(tx3.Id(), clog, tx3.XipList()) // false
 ## TODO
 
 - [x] Refactor all tests + `cmd/main.go` into proper `_test.go` files
+- [ ] Query Planner (rule-based scan selection, cost estimation)
 - [ ] JOIN operators (Nested Loop, Hash Join, Sort-Merge Join)
 - [ ] Integrate transactions into executors (automatic clog logging)
 - [ ] Buffer Pool (LRU cache, page eviction, flush clog/memory to disk)
