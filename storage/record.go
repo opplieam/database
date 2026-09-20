@@ -10,6 +10,22 @@ import (
 // Tuple represents a single row as a slice of values.
 type Tuple = []any
 
+// TID (Tuple ID) uniquely identifies a tuple in a heap file.
+// Used by indexes to point to tuples without storing them.
+//
+// Example:
+//
+//	Page 2, Slot 5 → TID{PageId: 2, SlotId: 5}
+//
+// Usage in B+ tree:
+//
+//	Leaf node: Keys = [100, 200, 300]
+//	Leaf node: TIDs = [{Page:0, Slot:0}, {Page:1, Slot:2}, {Page:2, Slot:1}]
+type TID struct {
+	PageId uint32
+	SlotId uint16
+}
+
 // TxRecord wraps a Tuple with MVCC version metadata.
 //
 // Fields:

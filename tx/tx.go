@@ -13,11 +13,11 @@ const (
 type IsolationLevel int
 
 const (
-	// RepeatableRead: snapshot taken at transaction start.
+	// RepeatableRead snapshot taken at transaction start.
 	// All statements in the transaction see the same data.
 	RepeatableRead IsolationLevel = iota
 
-	// ReadCommitted: snapshot taken at each statement.
+	// ReadCommitted snapshot taken at each statement.
 	// Each statement may see different data.
 	ReadCommitted
 )

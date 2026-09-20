@@ -20,8 +20,10 @@ How data lives on disk:
 ### Indexing (B+ Tree)
 How databases speed up lookups:
 - **Insert/Search** — Navigate internal nodes to find the right leaf
+- **TID Pointers** — Index stores Tuple IDs (page + slot), not full tuples
 - **Range scan** — Leaf nodes are linked, so scanning 100-200 is just walking the list
 - **Delete** — Borrow/merge nodes to keep the tree balanced
+- **DeleteByTID** — Remove index entries pointing to a specific tuple (used by VACUUM)
 - **Persistence** — Save/load tree to/from disk
 
 ### MVCC (Multi-Version Concurrency Control)
@@ -48,7 +50,7 @@ Each operator is a small, composable unit:
 | `Sort` | Buffers all rows, sorts, emits one at a time |
 | `Limit` | Stops after N rows |
 | `Insert` | Adds a record to a file |
-| `BTreeScan` | Walks a B+ tree's linked leaves |
+| `BTreeScan` | Walks a B+ tree's linked leaves, uses TupleReader to fetch tuples |
 
 ## Project Structure
 
@@ -172,6 +174,20 @@ recB.Visible(tx3.Id(), clog, tx3.XipList()) // false
 
 **Without FSM:** INSERT scans all pages O(n)
 **With FSM:** INSERT does O(1) lookup
+
+### TID Layout (Tuple ID)
+
+```
+┌─────────────────────────────────┐
+│ TID (8 bytes)                   │
+├─────────────────────────────────┤
+│ PageId  [0-3]  (4 bytes)       │
+│ SlotId  [4-5]  (2 bytes)       │
+│ (padding) [6-7] (2 bytes)      │
+└─────────────────────────────────┘
+```
+
+**Purpose:** Uniquely identify a tuple in a heap file. Used by indexes to point to tuples.
 
 ## TxRecord Layout
 

@@ -38,20 +38,20 @@ const BTreeNodeOrder = 4
 //   IsLeaf = false
 //   Keys = [30, 60]          (n-1 keys for n children)
 //   Children = [nodeA, nodeB, nodeC]
-//   Values = nil (not used)
+//   TIDs = nil (not used)
 //   Next = nil (not used)
 //
 // Leaf node:
 //   IsLeaf = true
 //   Keys = [10, 20, 30]
 //   Children = nil (not used)
-//   Values = [tuple1, tuple2, tuple3]  (one per key)
+//   TIDs = [{Page:0,Slot:0}, {Page:1,Slot:2}, {Page:2,Slot:1}]  (one per key)
 //   Next = pointer to next leaf (for range scans)
 type BTreeNode struct {
 	IsLeaf   bool
 	Keys     []int
 	Children []*BTreeNode
-	Values   []storage.Tuple
+	TIDs     []storage.TID
 	Next     *BTreeNode
 }
 
@@ -74,13 +74,14 @@ func NewBTree() *BTree {
 // NewLeafNode creates a new empty leaf node.
 //
 // Example:
-//   node = {IsLeaf: true, Keys: [], Children: nil, Values: [], Next: nil}
+//
+//	node = {IsLeaf: true, Keys: [], Children: nil, TIDs: [], Next: nil}
 func NewLeafNode() *BTreeNode {
 	return &BTreeNode{
 		IsLeaf:   true,
 		Keys:     make([]int, 0),
 		Children: nil,
-		Values:   make([]storage.Tuple, 0),
+		TIDs:     make([]storage.TID, 0),
 		Next:     nil,
 	}
 }
@@ -88,13 +89,14 @@ func NewLeafNode() *BTreeNode {
 // NewInternalNode creates a new empty internal node.
 //
 // Example:
-//   node = {IsLeaf: false, Keys: [], Children: [], Values: nil, Next: nil}
+//
+//	node = {IsLeaf: false, Keys: [], Children: [], TIDs: nil, Next: nil}
 func NewInternalNode() *BTreeNode {
 	return &BTreeNode{
 		IsLeaf:   false,
 		Keys:     make([]int, 0),
 		Children: make([]*BTreeNode, 0),
-		Values:   nil,
+		TIDs:     nil,
 		Next:     nil,
 	}
 }
@@ -170,24 +172,24 @@ func (n *BTreeNode) String() string {
 // Example: Search(40)
 //   Same path as above
 //   leaf [40,50]: search for 40 → found at index 0
-//   return Values[0], true
-func (t *BTree) Search(key int) (storage.Tuple, bool) {
+//	return TIDs[0], true
+func (t *BTree) Search(key int) (storage.TID, bool) {
 	if t.Root == nil {
-		return nil, false
+		return storage.TID{}, false
 	}
 	return searchNode(t.Root, key)
 }
 
 // searchNode recursively searches for a key in the tree.
-func searchNode(node *BTreeNode, key int) (storage.Tuple, bool) {
+func searchNode(node *BTreeNode, key int) (storage.TID, bool) {
 	if node.IsLeaf {
 		// leaf node: search for key
 		for i, k := range node.Keys {
 			if k == key {
-				return node.Values[i], true
+				return node.TIDs[i], true
 			}
 		}
-		return nil, false
+		return storage.TID{}, false
 	}
 
 	// internal node: find correct child
@@ -217,6 +219,18 @@ func (t *BTree) findLeaf(key int) *BTreeNode {
 			i++
 		}
 		node = node.Children[i]
+	}
+	return node
+}
+
+// findLeftmostLeaf returns the leftmost leaf node.
+func (t *BTree) findLeftmostLeaf() *BTreeNode {
+	if t.Root == nil {
+		return nil
+	}
+	node := t.Root
+	for !node.IsLeaf {
+		node = node.Children[0]
 	}
 	return node
 }
@@ -253,12 +267,12 @@ func (t *BTree) findLeaf(key int) *BTreeNode {
 //       ↓          ↓       ↓        ↓
 //    [1,2,10] → [...] → [...] → [...]
 //
-func (t *BTree) Insert(key int, value storage.Tuple) {
+func (t *BTree) Insert(key int, tid storage.TID) {
 	// empty tree: create root leaf
 	if t.Root == nil {
 		t.Root = NewLeafNode()
 		t.Root.Keys = []int{key}
-		t.Root.Values = []storage.Tuple{value}
+		t.Root.TIDs = []storage.TID{tid}
 		return
 	}
 
@@ -271,11 +285,11 @@ func (t *BTree) Insert(key int, value storage.Tuple) {
 		if key < leaf.Keys[i] {
 			// insert at position i
 			leaf.Keys = append(leaf.Keys, 0)
-			leaf.Values = append(leaf.Values, nil)
+			leaf.TIDs = append(leaf.TIDs, storage.TID{})
 			copy(leaf.Keys[i+1:], leaf.Keys[i:])
-			copy(leaf.Values[i+1:], leaf.Values[i:])
+			copy(leaf.TIDs[i+1:], leaf.TIDs[i:])
 			leaf.Keys[i] = key
-			leaf.Values[i] = value
+			leaf.TIDs[i] = tid
 			inserted = true
 			break
 		}
@@ -283,7 +297,7 @@ func (t *BTree) Insert(key int, value storage.Tuple) {
 	if !inserted {
 		// insert at end
 		leaf.Keys = append(leaf.Keys, key)
-		leaf.Values = append(leaf.Values, value)
+		leaf.TIDs = append(leaf.TIDs, tid)
 	}
 
 	// check for overflow
@@ -297,17 +311,19 @@ func (t *BTree) Insert(key int, value storage.Tuple) {
 // Example: split leaf [30, 35, 40, 50] (order=4, full)
 //
 // Before:
-//   leaf.Keys = [30, 35, 40, 50]
-//   leaf.Values = [v30, v35, v40, v50]
+//
+//	leaf.Keys = [30, 35, 40, 50]
+//	leaf.TIDs = [tid30, tid35, tid40, tid50]
 //
 // After split:
-//   leaf (left):  Keys = [30, 35], Values = [v30, v35]
-//   new (right):  Keys = [40, 50], Values = [v40, v50]
-//   push up key: 40 (the first key of right node)
+//
+//	leaf (left):  Keys = [30, 35], TIDs = [tid30, tid35]
+//	new (right):  Keys = [40, 50], TIDs = [tid40, tid50]
+//	push up key: 40 (the first key of right node)
 //
 // The right node is linked to left node for range scans:
-//   leaf.Next = new (for sequential access)
 //
+//	leaf.Next = new (for sequential access)
 func (t *BTree) splitLeaf(leaf *BTreeNode) {
 	// find middle index
 	mid := len(leaf.Keys) / 2
@@ -315,13 +331,13 @@ func (t *BTree) splitLeaf(leaf *BTreeNode) {
 	// create new right leaf
 	right := NewLeafNode()
 	right.Keys = make([]int, len(leaf.Keys)-mid)
-	right.Values = make([]storage.Tuple, len(leaf.Values)-mid)
+	right.TIDs = make([]storage.TID, len(leaf.TIDs)-mid)
 	copy(right.Keys, leaf.Keys[mid:])
-	copy(right.Values, leaf.Values[mid:])
+	copy(right.TIDs, leaf.TIDs[mid:])
 
 	// truncate left leaf
 	leaf.Keys = leaf.Keys[:mid]
-	leaf.Values = leaf.Values[:mid]
+	leaf.TIDs = leaf.TIDs[:mid]
 
 	// link leaves for range scans
 	right.Next = leaf.Next
@@ -537,9 +553,9 @@ func (t *BTree) Delete(key int) {
 		return // key not found
 	}
 
-	// remove key-value pair
+	// remove key-TID pair
 	leaf.Keys = append(leaf.Keys[:idx], leaf.Keys[idx+1:]...)
-	leaf.Values = append(leaf.Values[:idx], leaf.Values[idx+1:]...)
+	leaf.TIDs = append(leaf.TIDs[:idx], leaf.TIDs[idx+1:]...)
 
 	// check for underflow
 	if leaf.IsUnderflow() && leaf != t.Root {
@@ -550,6 +566,39 @@ func (t *BTree) Delete(key int) {
 	if !t.Root.IsLeaf && len(t.Root.Keys) == 0 && len(t.Root.Children) == 1 {
 		t.Root = t.Root.Children[0]
 	}
+}
+
+// DeleteByTID removes the entry pointing to a specific TID.
+// Used by VACUUM to clean up orphaned index entries.
+//
+// Assumes TIDs are unique within the index (each TID appears once).
+// Returns true if an entry was removed, false if TID not found.
+func (t *BTree) DeleteByTID(tid storage.TID) bool {
+	if t.Root == nil {
+		return false
+	}
+
+	// traverse all leaf nodes
+	leaf := t.findLeftmostLeaf()
+	for leaf != nil {
+		// scan leaf for matching TID
+		for i := 0; i < len(leaf.TIDs); i++ {
+			if leaf.TIDs[i] == tid {
+				// found: remove entry
+				leaf.Keys = append(leaf.Keys[:i], leaf.Keys[i+1:]...)
+				leaf.TIDs = append(leaf.TIDs[:i], leaf.TIDs[i+1:]...)
+
+				// handle underflow if needed
+				if leaf.IsUnderflow() && leaf != t.Root {
+					t.handleUnderflow(leaf)
+				}
+				return true
+			}
+		}
+		leaf = leaf.Next
+	}
+
+	return false // TID not found
 }
 
 // handleUnderflow handles a node that has too few keys.
@@ -636,15 +685,15 @@ func (t *BTree) borrowFromLeft(node *BTreeNode, leftSibling *BTreeNode, parent *
 	if node.IsLeaf {
 		// leaf: take last key from sibling
 		lastKey := leftSibling.Keys[len(leftSibling.Keys)-1]
-		lastVal := leftSibling.Values[len(leftSibling.Values)-1]
+		lastTID := leftSibling.TIDs[len(leftSibling.TIDs)-1]
 
 		// remove from sibling
 		leftSibling.Keys = leftSibling.Keys[:len(leftSibling.Keys)-1]
-		leftSibling.Values = leftSibling.Values[:len(leftSibling.Values)-1]
+		leftSibling.TIDs = leftSibling.TIDs[:len(leftSibling.TIDs)-1]
 
 		// add to front of node
 		node.Keys = append([]int{lastKey}, node.Keys...)
-		node.Values = append([]storage.Tuple{lastVal}, node.Values...)
+		node.TIDs = append([]storage.TID{lastTID}, node.TIDs...)
 
 		// update parent key
 		parent.Keys[siblingIdx] = node.Keys[0]
@@ -684,15 +733,15 @@ func (t *BTree) borrowFromRight(node *BTreeNode, rightSibling *BTreeNode, parent
 	if node.IsLeaf {
 		// leaf: take first key from sibling
 		firstKey := rightSibling.Keys[0]
-		firstVal := rightSibling.Values[0]
+		firstTID := rightSibling.TIDs[0]
 
 		// remove from sibling
 		rightSibling.Keys = rightSibling.Keys[1:]
-		rightSibling.Values = rightSibling.Values[1:]
+		rightSibling.TIDs = rightSibling.TIDs[1:]
 
 		// add to end of node
 		node.Keys = append(node.Keys, firstKey)
-		node.Values = append(node.Values, firstVal)
+		node.TIDs = append(node.TIDs, firstTID)
 
 		// update parent key
 		parent.Keys[siblingIdx] = rightSibling.Keys[0]
@@ -728,9 +777,9 @@ func (t *BTree) borrowFromRight(node *BTreeNode, rightSibling *BTreeNode, parent
 //
 func (t *BTree) mergeWithLeft(node *BTreeNode, leftSibling *BTreeNode, parent *BTreeNode, siblingIdx int) {
 	if node.IsLeaf {
-		// merge leaf: combine keys and values
+		// merge leaf: combine keys and TIDs
 		leftSibling.Keys = append(leftSibling.Keys, node.Keys...)
-		leftSibling.Values = append(leftSibling.Values, node.Values...)
+		leftSibling.TIDs = append(leftSibling.TIDs, node.TIDs...)
 		leftSibling.Next = node.Next
 	} else {
 		// merge internal: combine keys and children
@@ -767,7 +816,7 @@ func (t *BTree) mergeWithRight(node *BTreeNode, rightSibling *BTreeNode, parent 
 	if node.IsLeaf {
 		// merge leaf
 		node.Keys = append(node.Keys, rightSibling.Keys...)
-		node.Values = append(node.Values, rightSibling.Values...)
+		node.TIDs = append(node.TIDs, rightSibling.TIDs...)
 		node.Next = rightSibling.Next
 	} else {
 		// merge internal
@@ -817,7 +866,7 @@ func (t *BTree) mergeWithRight(node *BTreeNode, rightSibling *BTreeNode, parent 
 //
 // Result: [25, 30, 35, 40]
 //
-func (t *BTree) RangeScan(min, max int) []storage.Tuple {
+func (t *BTree) RangeScan(min, max int) []storage.TID {
 	if t.Root == nil {
 		return nil
 	}
@@ -828,13 +877,13 @@ func (t *BTree) RangeScan(min, max int) []storage.Tuple {
 		return nil
 	}
 
-	var result []storage.Tuple
+	var result []storage.TID
 
 	// traverse leaf nodes
 	for leaf != nil {
 		for i, key := range leaf.Keys {
 			if key >= min && key <= max {
-				result = append(result, leaf.Values[i])
+				result = append(result, leaf.TIDs[i])
 			}
 			if key > max {
 				// no more keys in range
@@ -1042,14 +1091,11 @@ func writeNodeWithIDs(f *os.File, node *BTreeNode, nodeIDs map[*BTreeNode]uint32
 		}
 	}
 
-	// write values (leaf) or child IDs (internal)
+	// write TIDs (leaf) or child IDs (internal)
 	if node.IsLeaf {
-		for _, val := range node.Values {
-			valBytes := encodeTuple(val)
-			if err := binary.Write(f, binary.LittleEndian, uint32(len(valBytes))); err != nil {
-				return err
-			}
-			if _, err := f.Write(valBytes); err != nil {
+		for _, tid := range node.TIDs {
+			tidBytes := encodeTID(tid)
+			if _, err := f.Write(tidBytes); err != nil {
 				return err
 			}
 		}
@@ -1106,17 +1152,13 @@ func readNodeWithIDs(f *os.File) (*BTreeNode, []uint32, uint32, error) {
 	var nextID uint32
 
 	if node.IsLeaf {
-		node.Values = make([]storage.Tuple, keyCount)
+		node.TIDs = make([]storage.TID, keyCount)
 		for i := uint16(0); i < keyCount; i++ {
-			var valLen uint32
-			if err := binary.Read(f, binary.LittleEndian, &valLen); err != nil {
+			tidBytes := make([]byte, 8)
+			if _, err := io.ReadFull(f, tidBytes); err != nil {
 				return nil, nil, 0, err
 			}
-			valBytes := make([]byte, valLen)
-			if _, err := io.ReadFull(f, valBytes); err != nil {
-				return nil, nil, 0, err
-			}
-			node.Values[i] = decodeTuple(valBytes)
+			node.TIDs[i] = decodeTID(tidBytes)
 		}
 		if err := binary.Read(f, binary.LittleEndian, &nextID); err != nil {
 			return nil, nil, 0, err
@@ -1164,4 +1206,20 @@ func decodeTuple(data []byte) storage.Tuple {
 		offset += strLen
 	}
 	return t
+}
+
+// encodeTID encodes a TID to bytes (8 bytes: 4 for PageId + 2 for SlotId + 2 padding).
+func encodeTID(tid storage.TID) []byte {
+	buf := make([]byte, 8)
+	binary.LittleEndian.PutUint32(buf[0:4], tid.PageId)
+	binary.LittleEndian.PutUint16(buf[4:6], tid.SlotId)
+	return buf
+}
+
+// decodeTID decodes bytes to a TID.
+func decodeTID(data []byte) storage.TID {
+	return storage.TID{
+		PageId: binary.LittleEndian.Uint32(data[0:4]),
+		SlotId: binary.LittleEndian.Uint16(data[4:6]),
+	}
 }

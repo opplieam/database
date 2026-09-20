@@ -1,7 +1,6 @@
 package btree
 
 import (
-	"fmt"
 	"os"
 	"testing"
 
@@ -14,25 +13,25 @@ func TestBTreeInsertAndSearch(t *testing.T) {
 	tree := NewBTree()
 
 	records := []struct {
-		key   int
-		value storage.Tuple
+		key int
+		tid storage.TID
 	}{
-		{30, storage.Tuple{30, "Movie 30", "Action"}},
-		{10, storage.Tuple{10, "Movie 10", "Comedy"}},
-		{20, storage.Tuple{20, "Movie 20", "Drama"}},
-		{40, storage.Tuple{40, "Movie 40", "Horror"}},
-		{50, storage.Tuple{50, "Movie 50", "SciFi"}},
+		{30, storage.TID{PageId: 0, SlotId: 0}},
+		{10, storage.TID{PageId: 0, SlotId: 1}},
+		{20, storage.TID{PageId: 0, SlotId: 2}},
+		{40, storage.TID{PageId: 0, SlotId: 3}},
+		{50, storage.TID{PageId: 0, SlotId: 4}},
 	}
 
 	for _, r := range records {
-		tree.Insert(r.key, r.value)
+		tree.Insert(r.key, r.tid)
 	}
 
 	// Search existing keys
 	for _, r := range records {
-		val, ok := tree.Search(r.key)
+		tid, ok := tree.Search(r.key)
 		assert.True(t, ok, "Search(%d): should be found", r.key)
-		assert.Equal(t, r.value[0], val[0], "Search(%d): value mismatch", r.key)
+		assert.Equal(t, r.tid, tid, "Search(%d): TID mismatch", r.key)
 	}
 
 	// Search missing key
@@ -44,7 +43,7 @@ func TestBTreeRangeScan(t *testing.T) {
 	tree := NewBTree()
 
 	for i := 1; i <= 15; i++ {
-		tree.Insert(i*10, storage.Tuple{i * 10, "Movie", "Genre"})
+		tree.Insert(i*10, storage.TID{PageId: 0, SlotId: uint16(i)})
 	}
 
 	keys := tree.RangeScanKeys(25, 55)
@@ -56,7 +55,7 @@ func TestBTreeDelete(t *testing.T) {
 	tree := NewBTree()
 
 	for i := 1; i <= 10; i++ {
-		tree.Insert(i*10, storage.Tuple{i * 10, "Movie", "Genre"})
+		tree.Insert(i*10, storage.TID{PageId: 0, SlotId: uint16(i)})
 	}
 
 	// Delete some records
@@ -83,7 +82,7 @@ func TestBTreePersistence(t *testing.T) {
 	tree := NewBTree()
 
 	for i := 1; i <= 10; i++ {
-		tree.Insert(i*10, storage.Tuple{i * 10, "Movie", "Genre"})
+		tree.Insert(i*10, storage.TID{PageId: 0, SlotId: uint16(i)})
 	}
 
 	// Save to file
@@ -99,8 +98,39 @@ func TestBTreePersistence(t *testing.T) {
 
 	// Verify loaded tree
 	for i := 1; i <= 10; i++ {
-		val, ok := loadedTree.Search(i * 10)
+		tid, ok := loadedTree.Search(i * 10)
 		assert.True(t, ok, "Search(%d) on loaded tree: not found", i*10)
-		assert.Equal(t, fmt.Sprintf("%d", i*10), val[0], "Search(%d) on loaded tree: key mismatch", i*10)
+		assert.Equal(t, storage.TID{PageId: 0, SlotId: uint16(i)}, tid, "Search(%d) on loaded tree: TID mismatch", i*10)
 	}
+}
+
+func TestBTreeDeleteByTID(t *testing.T) {
+	tree := NewBTree()
+
+	// Insert entries
+	tid1 := storage.TID{PageId: 0, SlotId: 1}
+	tid2 := storage.TID{PageId: 0, SlotId: 2}
+	tid3 := storage.TID{PageId: 1, SlotId: 1}
+
+	tree.Insert(10, tid1)
+	tree.Insert(20, tid2)
+	tree.Insert(30, tid3)
+
+	// Delete by TID
+	removed := tree.DeleteByTID(tid2)
+	assert.True(t, removed, "should remove entry with matching TID")
+
+	// Verify entry removed
+	_, ok := tree.Search(20)
+	assert.False(t, ok, "Search(20) after delete: should not be found")
+
+	// Verify other entries still exist
+	_, ok = tree.Search(10)
+	assert.True(t, ok, "Search(10) after delete: should be found")
+	_, ok = tree.Search(30)
+	assert.True(t, ok, "Search(30) after delete: should be found")
+
+	// Try to delete non-existent TID
+	removed = tree.DeleteByTID(storage.TID{PageId: 99, SlotId: 99})
+	assert.False(t, removed, "should return false for non-existent TID")
 }

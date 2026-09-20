@@ -1,7 +1,6 @@
 package learn
 
 import (
-	"fmt"
 	"os"
 	"testing"
 
@@ -22,7 +21,7 @@ func (s *BTreeSuite) SetupSuite() {
 	s.T().Logf("Building B+ tree from test data")
 	s.tree = btree.NewBTree()
 	for _, m := range testMovies {
-		s.tree.Insert(int(m.MovieId), storage.Tuple{m.MovieId, m.Title, m.Genres})
+		s.tree.Insert(int(m.MovieId), storage.TID{PageId: 0, SlotId: uint16(m.MovieId)})
 	}
 	s.filename = "test_btree.data"
 }
@@ -33,14 +32,15 @@ func (s *BTreeSuite) TearDownSuite() {
 
 func (s *BTreeSuite) TestSearch() {
 	s.T().Logf("Search for movie ID 1")
-	val, ok := s.tree.Search(1)
+	tid, ok := s.tree.Search(1)
 	s.Require().True(ok, "should find movie ID 1")
-	s.Equal("Toy Story", val[1], "movie ID 1 should be Toy Story")
+	s.Equal(uint32(0), tid.PageId, "movie ID 1 should have PageId 0")
+	s.Equal(uint16(1), tid.SlotId, "movie ID 1 should have SlotId 1")
 
 	s.T().Logf("Search for movie ID 5")
-	val, ok = s.tree.Search(5)
+	tid, ok = s.tree.Search(5)
 	s.Require().True(ok, "should find movie ID 5")
-	s.Equal("Tom and Huck", val[1], "movie ID 5 should be Tom and Huck")
+	s.Equal(uint16(5), tid.SlotId, "movie ID 5 should have SlotId 5")
 
 	s.T().Logf("Search for non-existent movie")
 	_, ok = s.tree.Search(999)
@@ -67,11 +67,10 @@ func (s *BTreeSuite) TestPersistence() {
 	s.Require().NoError(err)
 
 	s.T().Logf("Search loaded tree")
-	val, ok := loadedTree.Search(1)
+	tid, ok := loadedTree.Search(1)
 	s.Require().True(ok, "should find movie ID 1 in loaded tree")
-
-	// Note: decoded tuples have strings (serialization converts types to strings)
-	s.Equal(fmt.Sprintf("%d", 1), val[0], "loaded tree should have correct key")
+	s.Equal(uint32(0), tid.PageId, "loaded tree should have correct PageId")
+	s.Equal(uint16(1), tid.SlotId, "loaded tree should have correct SlotId")
 
 	s.T().Logf("Range scan loaded tree")
 	keys := loadedTree.RangeScanKeys(3, 7)
@@ -79,8 +78,20 @@ func (s *BTreeSuite) TestPersistence() {
 }
 
 func (s *BTreeSuite) TestBTreeScanComposition() {
-	s.T().Logf("Step 1: Create BTreeScan")
-	scan := executors.NewBTreeScan(s.tree, nil)
+	s.T().Logf("Step 1: Create BTreeScan with mock tuple reader")
+
+	// Mock tuple reader that returns movie data based on TID
+	readTuple := func(tid storage.TID) (storage.Tuple, error) {
+		// Find movie by SlotId (which we used as MovieId)
+		for _, m := range testMovies {
+			if m.MovieId == uint32(tid.SlotId) {
+				return storage.Tuple{m.MovieId, m.Title, m.Genres}, nil
+			}
+		}
+		return nil, nil
+	}
+
+	scan := executors.NewBTreeScan(s.tree, readTuple, nil)
 
 	s.T().Logf("Step 2: Selection - filter movies with ID > 5")
 	filtered := executors.NewSelection(scan, func(t storage.Tuple) bool {
