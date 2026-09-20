@@ -13,6 +13,7 @@ import (
 func TestInsert(t *testing.T) {
 	filename := "test_insert_executor.data"
 	defer os.Remove(filename)
+	defer os.Remove(filename + ".fsm")
 
 	// Test 1: Insert into new file
 	insert1 := NewInsert(filename, storage.MovieRecord{1, "First Movie", "Action"}, 0)
@@ -46,6 +47,7 @@ func TestInsert(t *testing.T) {
 func TestInsertOverflow(t *testing.T) {
 	filename := "test_insert_overflow_executor.data"
 	defer os.Remove(filename)
+	defer os.Remove(filename + ".fsm")
 
 	// Insert 100 records to test page overflow
 	for i := uint32(1); i <= 100; i++ {

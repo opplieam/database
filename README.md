@@ -159,6 +159,20 @@ recB.Visible(tx3.Id(), clog, tx3.XipList()) // false
 ...
 ```
 
+### FSM File Layout (Free Space Map)
+
+```
+[4 bytes] page count (uint32)
+[2 bytes] page 0 free space (uint16)
+[2 bytes] page 1 free space (uint16)
+...
+```
+
+**Purpose:** Track free space per page for O(1) INSERT lookup.
+
+**Without FSM:** INSERT scans all pages O(n)
+**With FSM:** INSERT does O(1) lookup
+
 ## TxRecord Layout
 
 ```
