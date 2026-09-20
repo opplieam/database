@@ -30,3 +30,6 @@ go.work.sum
 # OS
 .DS_Store
 Thumbs.db
+
+# Temporary docs
+temp_doc/
