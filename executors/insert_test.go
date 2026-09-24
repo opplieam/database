@@ -16,7 +16,7 @@ func TestInsert(t *testing.T) {
 	defer os.Remove(filename + ".fsm")
 
 	// Test 1: Insert into new file
-	insert1 := NewInsert(filename, storage.MovieRecord{1, "First Movie", "Action"}, 0)
+	insert1 := NewInsert(filename, storage.MovieRecord{1, "First Movie", "Action"}, 0, nil)
 	_, err := insert1.Next()
 	assert.NoError(t, err)
 
@@ -25,7 +25,7 @@ func TestInsert(t *testing.T) {
 	assert.Equal(t, 1, len(movies1), "should have 1 record")
 
 	// Test 2: Insert into existing file
-	insert2 := NewInsert(filename, storage.MovieRecord{2, "Second Movie", "Comedy"}, 0)
+	insert2 := NewInsert(filename, storage.MovieRecord{2, "Second Movie", "Comedy"}, 0, nil)
 	_, err = insert2.Next()
 	assert.NoError(t, err)
 
@@ -34,7 +34,7 @@ func TestInsert(t *testing.T) {
 	assert.Equal(t, 2, len(movies2), "should have 2 records")
 
 	// Test 3: Insert with NULL bitmap
-	insert3 := NewInsert(filename, storage.MovieRecord{3, "", "Drama"}, 2) // NULL title
+	insert3 := NewInsert(filename, storage.MovieRecord{3, "", "Drama"}, 2, nil) // NULL title
 	_, err = insert3.Next()
 	assert.NoError(t, err)
 
@@ -51,7 +51,7 @@ func TestInsertOverflow(t *testing.T) {
 
 	// Insert 100 records to test page overflow
 	for i := uint32(1); i <= 100; i++ {
-		insert := NewInsert(filename, storage.MovieRecord{i, fmt.Sprintf("Movie %d", i), "Action"}, 0)
+		insert := NewInsert(filename, storage.MovieRecord{i, fmt.Sprintf("Movie %d", i), "Action"}, 0, nil)
 		_, err := insert.Next()
 		assert.NoError(t, err, "insert %d should succeed", i)
 	}

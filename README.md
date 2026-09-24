@@ -44,13 +44,13 @@ Each operator is a small, composable unit:
 | Operator | What It Does |
 |----------|--------------|
 | `MemoryScan` | Iterates over an in-memory slice |
-| `HeapFileScan` | Reads binary slotted pages |
+| `HeapFileScan` | Reads binary slotted pages, supports MVCC visibility filtering |
 | `Selection` | Filters rows with a predicate |
 | `Projection` | Picks/transforms columns |
 | `Sort` | Buffers all rows, sorts, emits one at a time |
 | `Limit` | Stops after N rows |
-| `Insert` | Adds a record to a file |
-| `BTreeScan` | Walks a B+ tree's linked leaves, uses TupleReader to fetch tuples |
+| `Insert` | Adds a record to a file, supports MVCC with automatic clog logging |
+| `BTreeScan` | Walks a B+ tree's linked leaves, uses TupleReader with MVCC visibility |
 
 ## Project Structure
 
@@ -100,28 +100,36 @@ clog, _ := tx.OpenCommitLog("clog.data")
 defer clog.Close()
 mgr := tx.NewTxManager()
 
-// tx=1: INSERT A, COMMIT
+// tx=1: INSERT with MVCC context
 tx1 := mgr.Begin(tx.RepeatableRead)
-recA := storage.InsertTxRecord(tx1.Id(), 0, storage.Tuple{"A"})
+ctx1 := &executors.TransactionContext{
+    Tx:       tx1,
+    Clog:     clog,
+    Snapshot: tx1.Id(),
+    XipList:  tx1.XipList(),
+}
+
+// Insert record (automatically creates TxRecord and logs to clog)
+insert := executors.NewInsert("movies.data", storage.MovieRecord{
+    MovieId: 1,
+    Title:   "Toy Story",
+    Genres:  "Animation",
+}, 0, ctx1)
+insert.Next()
 mgr.Commit(tx1)
-clog.LogCommit(tx1.Id())
 
-// tx=2: INSERT B (NOT committed)
+// tx=2: Scan with MVCC context (sees committed records)
 tx2 := mgr.Begin(tx.RepeatableRead)
-recB := storage.InsertTxRecord(tx2.Id(), 0, storage.Tuple{"B"})
-// not committed!
+ctx2 := &executors.TransactionContext{
+    Tx:       tx2,
+    Clog:     clog,
+    Snapshot: tx2.Id(),
+    XipList:  tx2.XipList(),
+}
 
-// tx=1 sees [A] (committed, empty xipList)
-recA.Visible(tx1.Id(), clog, tx1.XipList()) // true
-
-// tx=2 sees [A, B] (A committed, B is own change, empty xipList)
-recA.Visible(tx2.Id(), clog, tx2.XipList()) // true
-recB.Visible(tx2.Id(), clog, tx2.XipList()) // true
-
-// tx=3 sees [A] (B not committed, empty xipList)
-tx3 := mgr.Begin(tx.RepeatableRead)
-recA.Visible(tx3.Id(), clog, tx3.XipList()) // true
-recB.Visible(tx3.Id(), clog, tx3.XipList()) // false
+scan, _ := executors.NewHeapFileScan("movies.data", ctx2)
+results, _ := executor.Run(scan)
+// → [{1, "Toy Story", "Animation"}]
 ```
 
 ## On-Disk Format
@@ -208,7 +216,7 @@ recB.Visible(tx3.Id(), clog, tx3.XipList()) // false
 - [x] Refactor all tests + `cmd/main.go` into proper `_test.go` files
 - [ ] Query Planner (rule-based scan selection, cost estimation)
 - [ ] JOIN operators (Nested Loop, Hash Join, Sort-Merge Join)
-- [ ] Integrate transactions into executors (automatic clog logging)
+- [x] Integrate transactions into executors (automatic clog logging)
 - [ ] Buffer Pool (LRU cache, page eviction, flush clog/memory to disk)
 - [ ] Write-Ahead Logging (WAL)
 - [ ] Locking (row-level locks, gap locks)

@@ -27,7 +27,7 @@ func (s *ExecutorSuite) TearDownTest() {
 }
 
 func (s *ExecutorSuite) TestExecutorComposition() {
-	s.T().Logf("Step 1: Create HeapFileScan")
+	s.T().Logf("Step 1: Create HeapFileScan (legacy mode - reading raw MovieRecord)")
 	scan, err := executors.NewHeapFileScan(s.filename, nil)
 	s.Require().NoError(err)
 	defer scan.Close()
@@ -53,7 +53,6 @@ func (s *ExecutorSuite) TestExecutorComposition() {
 	s.T().Logf("Step 6: Verify results")
 	s.Equal(2, len(result), "should return 2 Comedy movies")
 
-	// Verify all results contain Comedy movies
 	for _, r := range result {
 		title := r[0].(string)
 		s.T().Logf("  - %s", title)

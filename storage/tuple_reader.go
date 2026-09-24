@@ -28,7 +28,7 @@ func NewTupleReader(path string) func(TID) (Tuple, error) {
 		}
 
 		// 4. Decode record to Tuple
-		movieId, title, genres, err := DecodeRecord(recordBytes)
+		movieId, title, genres, err := DecodeMovieRecord(recordBytes)
 		if err != nil {
 			return nil, err
 		}

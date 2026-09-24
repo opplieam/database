@@ -115,7 +115,8 @@ func TestInsertRecord(t *testing.T) {
 
 	// Insert into new file
 	record1 := MovieRecord{1, "First Movie", "Action"}
-	err := InsertRecord(filename, record1, 0)
+	encoded1 := EncodeMovieRecord(record1.MovieId, record1.Title, record1.Genres)
+	err := InsertRecord(filename, encoded1, 0)
 	assert.NoError(t, err)
 
 	movies1, err := ReadMoviesPages(filename)
@@ -125,7 +126,8 @@ func TestInsertRecord(t *testing.T) {
 
 	// Insert into existing file
 	record2 := MovieRecord{2, "Second Movie", "Comedy"}
-	err = InsertRecord(filename, record2, 0)
+	encoded2 := EncodeMovieRecord(record2.MovieId, record2.Title, record2.Genres)
+	err = InsertRecord(filename, encoded2, 0)
 	assert.NoError(t, err)
 
 	movies2, err := ReadMoviesPages(filename)
@@ -136,7 +138,8 @@ func TestInsertRecord(t *testing.T) {
 
 	// Insert with NULL bitmap
 	record3 := MovieRecord{3, "", "Drama"}
-	err = InsertRecord(filename, record3, 2) // NULL title
+	encoded3 := EncodeMovieRecord(record3.MovieId, record3.Title, record3.Genres)
+	err = InsertRecord(filename, encoded3, 2) // NULL title
 	assert.NoError(t, err)
 
 	movies3, err := ReadMoviesPages(filename)

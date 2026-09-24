@@ -1,10 +1,11 @@
 package storage
 
 import (
-	"database/tx"
 	"encoding/binary"
 	"errors"
 	"fmt"
+
+	"database/tx"
 )
 
 // Tuple represents a single row as a slice of values.
@@ -46,19 +47,19 @@ type TID struct {
 //	New version: TxRecord{TxMin:7, TxMax:0, CID:0}  ← new insert
 type TxRecord struct {
 	TxMin uint64
-	TxMax uint64  // 0 means alive
-	CID   uint32  // command id within transaction
+	TxMax uint64 // 0 means alive
+	CID   uint32 // command id within transaction
 	Data  Tuple
 }
 
-// EncodeRecord encodes a movie record as bytes:
+// EncodeMovieRecord encodes a movie record as bytes:
 //
 //	[4 bytes] uint32 movieId (little-endian)
 //	[1 byte]  uint8 title length
 //	[N bytes] title bytes
 //	[1 byte]  uint8 genres length
 //	[N bytes] genres bytes
-func EncodeRecord(movieId uint32, title, genres string) []byte {
+func EncodeMovieRecord(movieId uint32, title, genres string) []byte {
 	if len(title) > 255 {
 		title = title[:255]
 	}
@@ -84,8 +85,8 @@ func EncodeRecord(movieId uint32, title, genres string) []byte {
 	return data
 }
 
-// DecodeRecord decodes a movie record from bytes.
-func DecodeRecord(data []byte) (movieId uint32, title, genres string, err error) {
+// DecodeMovieRecord decodes a movie record from bytes.
+func DecodeMovieRecord(data []byte) (movieId uint32, title, genres string, err error) {
 	if len(data) < 4 {
 		return 0, "", "", errors.New("data too short for movieId")
 	}
@@ -261,10 +262,10 @@ func DecodeTxRecord(buf []byte) (TxRecord, error) {
 // Visibility rules (simplified from PostgreSQL):
 //
 // A record is VISIBLE if:
-//   1. It's my own uncommitted change
-//   2. The creator is NOT in my xip_list (was not in-progress at snapshot)
-//   3. The creator committed before my snapshot
-//   4. It's not deleted, OR the delete hasn't happened yet
+//  1. It's my own uncommitted change
+//  2. The creator is NOT in my xip_list (was not in-progress at snapshot)
+//  3. The creator committed before my snapshot
+//  4. It's not deleted, OR the delete hasn't happened yet
 //
 // A record is INVISIBLE if:
 //   - The creator is in my xip_list (was in-progress at snapshot)

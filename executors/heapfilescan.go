@@ -9,36 +9,48 @@ import (
 
 // HeapFileScan reads a binary file with slotted pages and yields one record at a time.
 //
+// When a TransactionContext is provided:
+//   - Decodes TxRecord with MVCC metadata (TxMin, TxMax, CID)
+//   - Only returns tuples visible to the current transaction
+//
+// When ctx is nil (legacy mode):
+//   - Decodes raw MovieRecord without MVCC filtering
+//
 // Example state transitions for a file with 3 records (page 0 has 2, page 1 has 1):
 //
 // Initial state:
-//   h.page = nil, h.recordIdx = 0, h.done = false
+//
+//	h.page = nil, h.recordIdx = 0, h.done = false
 //
 // Call 1: Next()
-//   h.page is nil → read page 0 from file
-//   page 0 has RecordCount=2
-//   h.page = page0, h.recordIdx = 0
-//   0 < 2 → true, get record 0, recordIdx becomes 1
-//   return Tuple{1, "Toy Story", "Adventure"}
+//
+//	h.page is nil → read page 0 from file
+//	page 0 has RecordCount=2
+//	h.page = page0, h.recordIdx = 0
+//	0 < 2 → true, get record 0, recordIdx becomes 1
+//	return Tuple{1, "Toy Story", "Adventure"}
 //
 // Call 2: Next()
-//   h.page = page0, h.recordIdx = 1, RecordCount = 2
-//   1 < 2 → true, get record 1, recordIdx becomes 2
-//   return Tuple{2, "Jumanji", "Adventure"}
+//
+//	h.page = page0, h.recordIdx = 1, RecordCount = 2
+//	1 < 2 → true, get record 1, recordIdx becomes 2
+//	return Tuple{2, "Jumanji", "Adventure"}
 //
 // Call 3: Next()
-//   h.page = page0, h.recordIdx = 2, RecordCount = 2
-//   2 < 2 → false, read next page (page 1)
-//   page 1 has RecordCount=1
-//   h.page = page1, h.recordIdx = 0
-//   0 < 1 → true, get record 0, recordIdx becomes 1
-//   return Tuple{3, "Grumpier Old Men", "Comedy"}
+//
+//	h.page = page0, h.recordIdx = 2, RecordCount = 2
+//	2 < 2 → false, read next page (page 1)
+//	page 1 has RecordCount=1
+//	h.page = page1, h.recordIdx = 0
+//	0 < 1 → true, get record 0, recordIdx becomes 1
+//	return Tuple{3, "Grumpier Old Men", "Comedy"}
 //
 // Call 4: Next()
-//   h.page = page1, h.recordIdx = 1, RecordCount = 1
-//   1 < 1 → false, try read next page
-//   io.EOF → no more pages
-//   h.done = true, return nil, io.EOF
+//
+//	h.page = page1, h.recordIdx = 1, RecordCount = 1
+//	1 < 1 → false, try read next page
+//	io.EOF → no more pages
+//	h.done = true, return nil, io.EOF
 type HeapFileScan struct {
 	file       *os.File
 	pageCount  uint32
@@ -46,11 +58,11 @@ type HeapFileScan struct {
 	page       *storage.Page
 	recordIdx  int
 	done       bool
-	xipList    map[uint64]bool
+	ctx        *TransactionContext
 }
 
 // NewHeapFileScan opens a binary file and reads the record count from the first 4 bytes.
-func NewHeapFileScan(path string, xipList map[uint64]bool) (*HeapFileScan, error) {
+func NewHeapFileScan(path string, ctx *TransactionContext) (*HeapFileScan, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -67,24 +79,19 @@ func NewHeapFileScan(path string, xipList map[uint64]bool) (*HeapFileScan, error
 	return &HeapFileScan{
 		file:      f,
 		pageCount: count,
-		xipList:   xipList,
+		ctx:       ctx,
 	}, nil
 }
 
-// Next returns the next record as a Tuple, or io.EOF when exhausted.
+// Next returns the next visible record as a Tuple, or io.EOF when exhausted.
 //
-// Step-by-step for call N:
-// 1. If h.done → return EOF (already exhausted)
-// 2. If current page has records left (recordIdx < RecordCount):
-//    - Get record bytes from page at recordIdx
-//    - Increment recordIdx
-//    - Decode bytes → Tuple{id, title, genres}
-//    - Return Tuple
-// 3. Otherwise, read next 4096 bytes from file:
-//    - If io.EOF → set done=true, return EOF
-//    - Decode bytes → Page
-//    - Set h.page = new page, reset recordIdx = 0
-//    - Loop back to step 2
+// In MVCC mode (ctx != nil):
+//   - Decodes TxRecord
+//   - Checks visibility using TxRecord.Visible()
+//   - Skips invisible records
+//
+// In legacy mode (ctx == nil):
+//   - Decodes raw MovieRecord
 func (h *HeapFileScan) Next() (storage.Tuple, error) {
 	if h.done {
 		return nil, io.EOF
@@ -99,14 +106,24 @@ func (h *HeapFileScan) Next() (storage.Tuple, error) {
 			}
 			h.recordIdx++
 
-			// decode record into tuple
-			// Example: recordBytes = [01 00 00 00 09 54 6F 79 20 53 74 6F 72 79 09 41 64 76 65 6E 74 75 72 65]
-			//         DecodeRecord → id=1, title="Toy Story", genres="Adventure"
-			id, title, genres, err := storage.DecodeRecord(recordBytes)
-			if err != nil {
-				return nil, err
+			if h.ctx != nil {
+				// MVCC mode: decode TxRecord and check visibility
+				txRec, err := storage.DecodeTxRecord(recordBytes)
+				if err != nil {
+					return nil, err
+				}
+				if txRec.Visible(h.ctx.Snapshot, h.ctx.Clog, h.ctx.XipList) {
+					return txRec.Data, nil
+				}
+				// skip invisible record, continue loop
+			} else {
+				// Legacy mode: decode raw MovieRecord
+				id, title, genres, err := storage.DecodeMovieRecord(recordBytes)
+				if err != nil {
+					return nil, err
+				}
+				return storage.Tuple{id, title, genres}, nil
 			}
-			return storage.Tuple{id, title, genres}, nil
 		}
 
 		// read next page (4096 bytes)

@@ -17,9 +17,14 @@ func TestBTreeScan(t *testing.T) {
 		tree.Insert(i*10, storage.TID{PageId: 0, SlotId: uint16(i)})
 	}
 
-	// Mock tuple reader that returns a tuple based on TID
-	readTuple := func(tid storage.TID) (storage.Tuple, error) {
-		return storage.Tuple{int(tid.SlotId) * 10, "Movie", "Genre"}, nil
+	// Mock tuple reader that returns a TxRecord based on TID
+	readTuple := func(tid storage.TID) (storage.TxRecord, error) {
+		return storage.TxRecord{
+			TxMin: 0,
+			TxMax: 0,
+			CID:   0,
+			Data:  storage.Tuple{int(tid.SlotId) * 10, "Movie", "Genre"},
+		}, nil
 	}
 
 	// Scan all records

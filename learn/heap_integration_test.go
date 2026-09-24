@@ -26,7 +26,7 @@ func (s *HeapSuite) TearDownTest() {
 }
 
 func (s *HeapSuite) TestHeapFileScanIO() {
-	s.T().Logf("Step 1: Open HeapFileScan")
+	s.T().Logf("Step 1: Open HeapFileScan (legacy mode - reading raw MovieRecord)")
 	scan, err := executors.NewHeapFileScan(s.filename, nil)
 	s.Require().NoError(err)
 	defer scan.Close()

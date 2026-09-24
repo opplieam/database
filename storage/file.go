@@ -152,7 +152,7 @@ func WriteMoviesPages(path string, movies []MovieRecord) error {
 	defer file.Close()
 
 	for _, m := range movies {
-		encoded := EncodeRecord(m.MovieId, m.Title, m.Genres)
+		encoded := EncodeMovieRecord(m.MovieId, m.Title, m.Genres)
 		var nullBitmap uint8
 
 		page := NewPage(file.PageCount())
@@ -195,7 +195,7 @@ func ReadMoviesPages(path string) ([]MovieRecord, error) {
 				return nil, err
 			}
 
-			id, title, genres, err := DecodeRecord(recordBytes)
+			id, title, genres, err := DecodeMovieRecord(recordBytes)
 			if err != nil {
 				return nil, err
 			}
@@ -221,12 +221,15 @@ func ReadMoviesPages(path string) ([]MovieRecord, error) {
 	return movies, nil
 }
 
-// InsertRecord inserts one record into a slotted page file.
+// InsertRecord inserts pre-encoded bytes into a slotted page file.
 //
 // If file doesn't exist, creates new file with one page containing this record.
 // Uses FSM for O(1) page lookup instead of scanning all pages.
-func InsertRecord(path string, record MovieRecord, nullBitmap uint8) error {
-	encoded := EncodeRecord(record.MovieId, record.Title, record.Genres)
+//
+// Callers encode their data before calling:
+//   - Raw records: EncodeMovieRecord(movieId, title, genres)
+//   - MVCC records: EncodeTxRecord(txRec)
+func InsertRecord(path string, encoded []byte, nullBitmap uint8) error {
 	recordLen := len(encoded)
 
 	// try to open existing file

@@ -80,15 +80,20 @@ func (s *BTreeSuite) TestPersistence() {
 func (s *BTreeSuite) TestBTreeScanComposition() {
 	s.T().Logf("Step 1: Create BTreeScan with mock tuple reader")
 
-	// Mock tuple reader that returns movie data based on TID
-	readTuple := func(tid storage.TID) (storage.Tuple, error) {
+	// Mock tuple reader that returns TxRecord based on TID
+	readTuple := func(tid storage.TID) (storage.TxRecord, error) {
 		// Find movie by SlotId (which we used as MovieId)
 		for _, m := range testMovies {
 			if m.MovieId == uint32(tid.SlotId) {
-				return storage.Tuple{m.MovieId, m.Title, m.Genres}, nil
+				return storage.TxRecord{
+					TxMin: 0,
+					TxMax: 0,
+					CID:   0,
+					Data:  storage.Tuple{m.MovieId, m.Title, m.Genres},
+				}, nil
 			}
 		}
-		return nil, nil
+		return storage.TxRecord{}, nil
 	}
 
 	scan := executors.NewBTreeScan(s.tree, readTuple, nil)

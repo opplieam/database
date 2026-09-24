@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestEncodeDecodeRecord(t *testing.T) {
+func TestEncodeDecodeMovieRecord(t *testing.T) {
 	tests := []struct {
 		name    string
 		id      uint32
@@ -24,8 +24,8 @@ func TestEncodeDecodeRecord(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			encoded := EncodeRecord(tt.id, tt.title, tt.genres)
-			decodedId, decodedTitle, decodedGenres, err := DecodeRecord(encoded)
+			encoded := EncodeMovieRecord(tt.id, tt.title, tt.genres)
+			decodedId, decodedTitle, decodedGenres, err := DecodeMovieRecord(encoded)
 
 			assert.NoError(t, err)
 			assert.Equal(t, tt.id, decodedId)

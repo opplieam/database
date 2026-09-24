@@ -106,7 +106,8 @@ func TestFSMIntegration(t *testing.T) {
 	// insert records
 	for i := uint32(1); i <= 5; i++ {
 		record := MovieRecord{i, "Movie", "Action"}
-		err := InsertRecord(filename, record, 0)
+		encoded := EncodeMovieRecord(record.MovieId, record.Title, record.Genres)
+		err := InsertRecord(filename, encoded, 0)
 		assert.NoError(t, err)
 	}
 
