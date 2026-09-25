@@ -6,6 +6,7 @@ import (
 
 	"database/storage"
 	"database/tx"
+	"database/btree"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -574,4 +575,120 @@ func TestFullVacuumFlow(t *testing.T) {
 	rec4, _ := page4.GetRecord(0)
 	txRec4, _ := storage.DecodeTxRecord(rec4)
 	assert.NotEqual(t, FrozenTxID, txRec4.TxMin, "TxMin NOT frozen")
+}
+
+// =============================================================================
+// Tests for VacuumIndexes (table-driven)
+// =============================================================================
+
+func TestVacuumIndexes(t *testing.T) {
+	tests := []struct {
+		name          string
+		treeKeys      []int
+		treeTIDs      []storage.TID
+		deadTIDs      []storage.TID
+		wantRemoved   int
+		wantRemaining []int
+	}{
+		{
+			name: "Remove dead index entries",
+			treeKeys: []int{100, 200, 300, 400},
+			treeTIDs: []storage.TID{
+				{PageId: 0, SlotId: 1},
+				{PageId: 1, SlotId: 0},
+				{PageId: 2, SlotId: 1},
+				{PageId: 3, SlotId: 2},
+			},
+			deadTIDs: []storage.TID{
+				{PageId: 1, SlotId: 0},
+				{PageId: 3, SlotId: 2},
+			},
+			wantRemoved:   2,
+			wantRemaining: []int{100, 300},
+		},
+		{
+			name: "TID not in index",
+			treeKeys: []int{100, 200},
+			treeTIDs: []storage.TID{
+				{PageId: 0, SlotId: 0},
+				{PageId: 1, SlotId: 0},
+			},
+			deadTIDs: []storage.TID{
+				{PageId: 5, SlotId: 5},
+			},
+			wantRemoved:   0,
+			wantRemaining: []int{100, 200},
+		},
+		{
+			name:          "Empty tree",
+			treeKeys:      []int{},
+			treeTIDs:      []storage.TID{},
+			deadTIDs:      []storage.TID{{PageId: 0, SlotId: 0}},
+			wantRemoved:   0,
+			wantRemaining: []int{},
+		},
+		{
+			name: "Multiple dead TIDs",
+			treeKeys: []int{10, 20, 30},
+			treeTIDs: []storage.TID{
+				{PageId: 0, SlotId: 0},
+				{PageId: 0, SlotId: 1},
+				{PageId: 0, SlotId: 2},
+			},
+			deadTIDs: []storage.TID{
+				{PageId: 0, SlotId: 0},
+				{PageId: 0, SlotId: 2},
+			},
+			wantRemoved:   2,
+			wantRemaining: []int{20},
+		},
+		{
+			name: "All entries dead",
+			treeKeys: []int{100, 200},
+			treeTIDs: []storage.TID{
+				{PageId: 0, SlotId: 0},
+				{PageId: 1, SlotId: 0},
+			},
+			deadTIDs: []storage.TID{
+				{PageId: 0, SlotId: 0},
+				{PageId: 1, SlotId: 0},
+			},
+			wantRemoved:   2,
+			wantRemaining: []int{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			bt := btree.NewBTree()
+			for i, key := range tt.treeKeys {
+				bt.Insert(key, tt.treeTIDs[i])
+			}
+
+			// Act
+			removed := VacuumIndexes(bt, tt.deadTIDs)
+
+			// Assert
+			assert.Equal(t, tt.wantRemoved, removed)
+			for _, key := range tt.wantRemaining {
+				_, found := bt.Search(key)
+				assert.True(t, found, "key %d should remain", key)
+			}
+			// Verify dead keys are gone
+			for _, key := range tt.treeKeys {
+				found := false
+				for _, remainKey := range tt.wantRemaining {
+					if key == remainKey {
+						found = true
+						break
+					}
+				}
+				if !found {
+					_, exists := bt.Search(key)
+					assert.False(t, exists, "key %d should be removed", key)
+				}
+			}
+		})
+	}
 }

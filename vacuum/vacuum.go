@@ -1,8 +1,10 @@
 package vacuum
 
 import (
+	"fmt"
 	"database/storage"
 	"database/tx"
+	"database/btree"
 )
 
 const FrozenTxID = uint64(2)
@@ -222,4 +224,23 @@ func MarkDead(filename string, deadTIDs []storage.TID) error {
 	}
 
 	return nil
+}
+
+// VacuumIndexes removes index entries pointing to dead tuples.
+//
+// This is Phase 2 of VACUUM. After Phase 1 finds dead tuples,
+// Phase 2 removes their index entries to keep indexes consistent.
+//
+// Returns the number of entries removed.
+func VacuumIndexes(bt *btree.BTree, deadTIDs []storage.TID) int {
+	removed := 0
+	for _, tid := range deadTIDs {
+		if bt.DeleteByTID(tid) {
+			removed++
+		}
+	}
+	if removed > 0 {
+		fmt.Printf("Vacuum: removed %d orphaned index entries\n", removed)
+	}
+	return removed
 }
