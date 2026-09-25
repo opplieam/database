@@ -70,6 +70,14 @@ type FrozenTuple struct {
 	OldMin uint64                   // Original TxMin value (before freezing)
 }
 
+// VacuumStats holds statistics about a VACUUM operation.
+type VacuumStats struct {
+	DeadTuples    int  // Number of dead tuples found
+	FrozenTuples  int  // Number of tuples frozen
+	IndexEntries  int  // Number of index entries removed
+	PagesModified int  // Number of pages modified
+}
+
 // ScanHeap scans a heap file to find dead tuples and tuples to freeze.
 //
 // Dead tuple: TxMax != 0 && committed && not in xipList
@@ -379,4 +387,57 @@ func updateFSM(filename string, deadTIDs []storage.TID, fsmPath string) error {
 	}
 
 	return nil
+}
+
+// Vacuum performs a complete VACUUM operation.
+//
+// This is the main entry point for VACUUM. It orchestrates all phases:
+//   1. ScanHeap - find dead tuples and tuples to freeze
+//   2. ApplyFreezes - update old tuples to prevent wraparound
+//   3. VacuumIndexes - remove orphaned index entries
+//   4. VacuumHeap - mark dead tuples and update FSM
+//
+// Parameters:
+//   - filename: path to heap file
+//   - clog: commit log for visibility checks
+//   - bt: B+ tree index (optional, pass nil if no index)
+//   - fsmPath: FSM file path (optional, pass empty string to skip FSM update)
+//   - xipList: in-progress transactions
+//   - currentTxID: current transaction ID
+//   - freezeMaxAge: freeze threshold (tuple age before freezing)
+//
+// Returns statistics about what was done.
+func Vacuum(filename string, clog *tx.CommitLog, bt *btree.BTree,
+	fsmPath string, xipList map[uint64]bool, currentTxID uint64, freezeMaxAge uint64) (*VacuumStats, error) {
+
+	stats := &VacuumStats{}
+
+	// Phase 1: Scan Heap
+	result, err := ScanHeap(filename, clog, xipList, currentTxID, freezeMaxAge)
+	if err != nil {
+		return nil, err
+	}
+	stats.DeadTuples = len(result.DeadTIDs)
+	stats.FrozenTuples = len(result.FrozenTuples)
+
+	// Phase 1.5: Apply Freezes
+	if len(result.FrozenTuples) > 0 {
+		if err := ApplyFreezes(filename, result.FrozenTuples); err != nil {
+			return nil, err
+		}
+	}
+
+	// Phase 2: Vacuum Indexes
+	if bt != nil && len(result.DeadTIDs) > 0 {
+		stats.IndexEntries = VacuumIndexes(bt, result.DeadTIDs)
+	}
+
+	// Phase 3: Vacuum Heap
+	if len(result.DeadTIDs) > 0 {
+		if err := VacuumHeap(filename, result.DeadTIDs, fsmPath); err != nil {
+			return nil, err
+		}
+	}
+
+	return stats, nil
 }

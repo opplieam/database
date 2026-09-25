@@ -40,10 +40,10 @@ How databases handle concurrent reads and writes:
 
 ### VACUUM (Garbage Collection)
 How databases clean up dead tuples:
-- **Dead tuple detection** — Find tuples with TxMax set and committed
+- **Dead tuple detection** — Scan heap to find tuples with committed deletions
 - **Freeze processing** — Prevent transaction ID wraparound by freezing old tuples
-- **Mark dead** — Mark slots as dead (normal VACUUM, not VACUUM FULL)
-- **Wraparound handling** — Correctly handle TxID overflow with freezeMaxAge
+- **Index cleanup** — Remove orphaned index entries pointing to dead tuples
+- **Heap cleanup** — Mark dead slots and update Free Space Map (FSM)
 
 ### Query Operators
 Each operator is a small, composable unit:
@@ -140,6 +140,28 @@ results, _ := executor.Run(scan)
 // → [{1, "Toy Story", "Animation"}]
 ```
 
+## VACUUM Example
+
+```go
+// Create commit log
+clog, _ := tx.OpenCommitLog("clog.data")
+defer clog.Close()
+
+// Create B+ tree index (optional)
+bt := btree.NewBTree()
+bt.Insert(100, storage.TID{PageId: 0, SlotId: 0})
+bt.Insert(200, storage.TID{PageId: 0, SlotId: 1})
+
+// Run complete VACUUM
+// Parameters: heap file, commit log, index, FSM path, xip list, current txID, freeze age
+stats, err := vacuum.Vacuum("movies.data", clog, bt, "movies.fsm",
+    map[uint64]bool{}, 100, 50)
+
+fmt.Printf("Dead tuples: %d\n", stats.DeadTuples)
+fmt.Printf("Frozen tuples: %d\n", stats.FrozenTuples)
+fmt.Printf("Index entries removed: %d\n", stats.IndexEntries)
+```
+
 ## On-Disk Format
 
 ### Page Layout (4096 bytes)
@@ -228,5 +250,5 @@ results, _ := executor.Run(scan)
 - [ ] Buffer Pool (LRU cache, page eviction, flush clog/memory to disk)
 - [ ] Write-Ahead Logging (WAL)
 - [ ] Locking (row-level locks, gap locks)
-- [ ] VACUUM (clean up dead tuples)
+- [x] VACUUM (dead tuple detection, freeze processing, index/heap vacuuming)
 - [x] xip_list (snapshot of in-progress transactions)
