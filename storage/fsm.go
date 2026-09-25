@@ -69,6 +69,12 @@ func (fsm *FreeSpaceMap) Close() error {
 	return fsm.file.Close()
 }
 
+// Save writes FSM data from memory to disk.
+// Call this after Update() to persist changes.
+func (fsm *FreeSpaceMap) Save() error {
+	return fsm.save()
+}
+
 // load reads FSM data from disk into memory.
 func (fsm *FreeSpaceMap) load() error {
 	// seek to start

@@ -30,6 +30,24 @@ func createTestHeapFile(t *testing.T, filename string, records []storage.TxRecor
 	}
 }
 
+// Test helper: create a heap file with all TxRecords on the same page
+func createTestHeapFileSinglePage(t *testing.T, filename string, records []storage.TxRecord) {
+	t.Helper()
+
+	// Create file
+	file, err := storage.Create(filename)
+	require.NoError(t, err)
+	defer file.Close()
+
+	// Create a single page with all records
+	page := storage.NewPage(0)
+	for _, rec := range records {
+		encoded := storage.EncodeTxRecord(rec)
+		page.AddRecord(encoded, 0)
+	}
+	require.NoError(t, file.AppendPage(page))
+}
+
 // Test helper: create a CommitLog with committed transactions
 func createTestClog(t *testing.T, filename string, committed []uint64) *tx.CommitLog {
 	t.Helper()
@@ -689,6 +707,140 @@ func TestVacuumIndexes(t *testing.T) {
 					assert.False(t, exists, "key %d should be removed", key)
 				}
 			}
+		})
+	}
+}
+
+// =============================================================================
+// Tests for VacuumHeap (table-driven)
+// =============================================================================
+
+func TestVacuumHeap(t *testing.T) {
+	tests := []struct {
+		name           string
+		records        []storage.TxRecord
+		deadTIDs       []storage.TID
+		initialFSM     []uint16
+		wantDead       []int
+		wantFSMUpdated bool
+	}{
+		{
+			name: "Mark dead and update FSM",
+			records: []storage.TxRecord{
+				{TxMin: 1, TxMax: 0, CID: 0, Data: storage.Tuple{"alive"}},
+				{TxMin: 2, TxMax: 3, CID: 0, Data: storage.Tuple{"dead"}},
+			},
+			deadTIDs:       []storage.TID{{PageId: 0, SlotId: 1}},
+			initialFSM:     []uint16{4000},
+			wantDead:       []int{1},
+			wantFSMUpdated: true,
+		},
+		{
+			name: "Mark dead without FSM",
+			records: []storage.TxRecord{
+				{TxMin: 1, TxMax: 0, CID: 0, Data: storage.Tuple{"alive"}},
+				{TxMin: 2, TxMax: 3, CID: 0, Data: storage.Tuple{"dead"}},
+			},
+			deadTIDs:       []storage.TID{{PageId: 0, SlotId: 1}},
+			initialFSM:     nil,
+			wantDead:       []int{1},
+			wantFSMUpdated: false,
+		},
+		{
+			name: "No dead tuples",
+			records: []storage.TxRecord{
+				{TxMin: 1, TxMax: 0, CID: 0, Data: storage.Tuple{"alive"}},
+			},
+			deadTIDs:       []storage.TID{},
+			initialFSM:     []uint16{4000},
+			wantDead:       []int{},
+			wantFSMUpdated: false,
+		},
+		{
+			name: "Multiple pages with dead tuples",
+			records: []storage.TxRecord{
+				{TxMin: 1, TxMax: 0, CID: 0, Data: storage.Tuple{"page0-alive"}},
+				{TxMin: 2, TxMax: 3, CID: 0, Data: storage.Tuple{"page0-dead"}},
+			},
+			deadTIDs: []storage.TID{
+				{PageId: 0, SlotId: 1},
+			},
+			initialFSM:     []uint16{4000},
+			wantDead:       []int{1},
+			wantFSMUpdated: true,
+		},
+		{
+			name: "All tuples dead",
+			records: []storage.TxRecord{
+				{TxMin: 1, TxMax: 2, CID: 0, Data: storage.Tuple{"dead1"}},
+				{TxMin: 3, TxMax: 4, CID: 0, Data: storage.Tuple{"dead2"}},
+			},
+			deadTIDs: []storage.TID{
+				{PageId: 0, SlotId: 0},
+				{PageId: 0, SlotId: 1},
+			},
+			initialFSM:     []uint16{4000},
+			wantDead:       []int{0, 1},
+			wantFSMUpdated: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			heapFile := "test_vacuum_heap.db"
+			fsmFile := "test_vacuum_heap.fsm"
+
+			// Create heap file
+			createTestHeapFileSinglePage(t, heapFile, tt.records)
+
+			// Create FSM if needed
+			if tt.initialFSM != nil {
+				fsm, err := storage.CreateFSM(fsmFile)
+				require.NoError(t, err)
+				for _, free := range tt.initialFSM {
+					fsm.AddPage(free)
+				}
+				fsm.Close()
+			}
+
+			// Act
+			fsmPath := ""
+			if tt.wantFSMUpdated {
+				fsmPath = fsmFile
+			}
+			err := VacuumHeap(heapFile, tt.deadTIDs, fsmPath)
+
+			// Assert
+			assert.NoError(t, err)
+
+			// Verify dead tuples marked
+			file, err := storage.Open(heapFile)
+			require.NoError(t, err)
+			defer file.Close()
+
+			for _, slotIdx := range tt.wantDead {
+				page, err := file.ReadPage(0)
+				require.NoError(t, err)
+				assert.True(t, page.IsSlotDead(slotIdx), "slot %d should be dead", slotIdx)
+			}
+
+			// Verify FSM updated
+			if tt.wantFSMUpdated && len(tt.initialFSM) > 0 {
+				fsm, err := storage.OpenFSM(fsmFile)
+				require.NoError(t, err)
+				defer fsm.Close()
+
+				// Free space should be greater than initial
+				initialFree := tt.initialFSM[0]
+				currentFree := fsm.Get(0)
+				assert.Greater(t, int(currentFree), int(initialFree),
+					"FSM should show more free space after marking dead")
+			}
+
+			// Cleanup
+			os.Remove(heapFile)
+			os.Remove(fsmFile)
 		})
 	}
 }
