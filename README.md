@@ -38,6 +38,13 @@ How databases handle concurrent reads and writes:
 - **Repeatable Read** — xip_list fixed at transaction start, all statements see same data
 - **Read Committed** — xip_list refreshed at each statement via `NewStatement()`, may see different data
 
+### VACUUM (Garbage Collection)
+How databases clean up dead tuples:
+- **Dead tuple detection** — Find tuples with TxMax set and committed
+- **Freeze processing** — Prevent transaction ID wraparound by freezing old tuples
+- **Mark dead** — Mark slots as dead (normal VACUUM, not VACUUM FULL)
+- **Wraparound handling** — Correctly handle TxID overflow with freezeMaxAge
+
 ### Query Operators
 Each operator is a small, composable unit:
 
@@ -60,6 +67,7 @@ database/
 ├── storage/              # Pages, records, file I/O
 ├── tx/                   # Transaction management, commit log
 ├── btree/                # B+ tree index
+├── vacuum/               # VACUUM (garbage collection)
 ├── learn/                # Entry point — run and test things here
 ├── movies.csv            # Sample data (27K movies)
 └── go.mod
@@ -68,7 +76,7 @@ database/
 ## How to Run
 
 ```bash
-# Unit tests (storage, executors, btree, tx)
+# Unit tests (storage, executors, btree, tx, vacuum)
 go test ./...
 
 # Learn — run and step through code

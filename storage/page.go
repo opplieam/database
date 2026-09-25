@@ -216,6 +216,86 @@ func (p *Page) GetRecord(index int) ([]byte, error) {
 	return record, nil
 }
 
+// MarkSlotDead marks a line pointer as dead (space available for reuse).
+//
+// This is how PostgreSQL's NORMAL VACUUM works:
+//   - Dead tuples are marked, NOT moved
+//   - Space becomes available for new INSERTs
+//   - Fast, minimal I/O
+//
+// VACUUM FULL would rewrite the entire table (we don't implement this).
+// VACUUM FULL compacts pages by moving records; normal VACUUM just marks slots.
+//
+// How it works:
+//   - Set line pointer length to 0
+//   - This tells the system this slot is available for reuse
+//   - The actual record bytes stay in place (dead space)
+//   - New INSERTs can reuse this slot
+func (p *Page) MarkSlotDead(index int) {
+	if index < 0 || index >= int(p.Header.RecordCount) {
+		return
+	}
+	// Mark line pointer as dead by setting length to 0
+	// This is the PostgreSQL convention for dead tuples
+	p.LinePointers[index].Length = 0
+}
+
+// IsSlotDead checks if a slot is marked as dead (length == 0).
+func (p *Page) IsSlotDead(index int) bool {
+	if index < 0 || index >= int(p.Header.RecordCount) {
+		return false
+	}
+	return p.LinePointers[index].Length == 0
+}
+
+// FreezeTuple updates TxMin to prevent transaction ID wraparound.
+//
+// Frozen tuples are always visible to everyone.
+// This is part of NORMAL VACUUM (not VACUUM FULL).
+//
+// How it works:
+//   - Decode TxRecord from slot
+//   - Set TxMin to FrozenTxID (2)
+//   - Encode back and update slot
+//
+// TxMin is always 8 bytes, so record length won't change.
+func (p *Page) FreezeTuple(index int, newTxMin uint64) error {
+	if index < 0 || index >= int(p.Header.RecordCount) {
+		return errors.New("record index out of bounds")
+	}
+
+	// Skip dead slots
+	if p.LinePointers[index].Length == 0 {
+		return nil
+	}
+
+	// Get record bytes
+	recordBytes, err := p.GetRecord(index)
+	if err != nil {
+		return err
+	}
+
+	// Decode TxRecord
+	txRecord, err := DecodeTxRecord(recordBytes)
+	if err != nil {
+		return err
+	}
+
+	// Update TxMin (freeze)
+	txRecord.TxMin = newTxMin
+
+	// Encode back
+	newRecordBytes := EncodeTxRecord(txRecord)
+
+	// TxMin is fixed 8 bytes, so length won't change
+	// Just replace the bytes in place
+	lp := &p.LinePointers[index]
+	recordStart := int(lp.Offset) - (PageSize - len(p.Records))
+	copy(p.Records[recordStart:recordStart+int(lp.Length)], newRecordBytes)
+
+	return nil
+}
+
 // Encode serializes the page to bytes.
 //
 // On-disk layout (4096 bytes total):
