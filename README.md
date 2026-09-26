@@ -244,12 +244,14 @@ fmt.Printf("Index entries removed: %d\n", stats.IndexEntries)
 ## TODO
 
 - [x] Refactor all tests + `cmd/main.go` into proper `_test.go` files
+- [x] Integrate transactions into executors (automatic clog logging)
+- [x] VACUUM (dead tuple detection, freeze processing, index/heap vacuuming)
+- [x] xip_list (snapshot of in-progress transactions)
 - [ ] Query Planner (rule-based scan selection, cost estimation)
 - [ ] JOIN operators (Nested Loop, Hash Join, Sort-Merge Join)
-- [x] Integrate transactions into executors (automatic clog logging)
 - [ ] Buffer Pool (LRU cache, page eviction, flush clog/memory to disk)
+- [ ] Cost-based throttling integration (after buffer pool is implemented)
 - [ ] Write-Ahead Logging (WAL)
 - [ ] Locking (row-level locks, gap locks)
-- [x] VACUUM (dead tuple detection, freeze processing, index/heap vacuuming)
-- [ ] Cost-based throttling integration (after buffer pool is implemented)
-- [x] xip_list (snapshot of in-progress transactions)
+- [ ] HOT (needs UPDATE/DELETE executors, same-page version chaining, skip-index rule for unchanged indexed columns, scan and VACUUM awareness)
+- [ ] Index-Only Scans (needs VM with per-page all-visible bits, VM maintenance, covering index payloads, BTreeScan path with heap fallback)
