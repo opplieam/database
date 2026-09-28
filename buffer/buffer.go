@@ -217,6 +217,18 @@ func (p *BufferPool) Stats() PoolStats {
 	}
 }
 
+// PinnedCount returns the number of slots currently pinned. Used by tests
+// to prove scans release every page they borrow.
+func (p *BufferPool) PinnedCount() int {
+	n := 0
+	for i := range p.slots {
+		if p.slots[i].desc.Valid && p.slots[i].desc.PinCount > 0 {
+			n++
+		}
+	}
+	return n
+}
+
 // findVictim runs clock sweep to pick a slot for reuse.
 //
 // Algorithm: walk slots in a circle from the hand, and per slot:
