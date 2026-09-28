@@ -98,13 +98,14 @@ func (s *PoolHeapScanMVCC) Next() (storage.Tuple, error) {
 			return nil, io.EOF
 		}
 
-		// Borrow the page for one record; return it before yielding.
+		// Step 1: borrow the current page for one record.
 		tag := buffer.BufferTag{Path: s.path, PageId: uint32(s.currentPage)}
 		page, err := s.pool.Get(tag)
 		if err != nil {
 			return nil, err
 		}
 
+		// Step 2: unread records remain? Read one, return the page.
 		if s.recordIdx < int(page.Header.RecordCount) {
 			recordBytes, err := page.GetRecord(s.recordIdx)
 			if err != nil {
@@ -116,6 +117,7 @@ func (s *PoolHeapScanMVCC) Next() (storage.Tuple, error) {
 				return nil, err
 			}
 
+			// Step 3: visible? Yield it; invisible? Loop for the next record.
 			txRec, err := storage.DecodeTxRecord(recordBytes)
 			if err != nil {
 				return nil, err
@@ -125,7 +127,7 @@ func (s *PoolHeapScanMVCC) Next() (storage.Tuple, error) {
 			}
 			// skip invisible record, continue loop
 		} else {
-			// Page exhausted: return it, advance to the next page.
+			// Step 4: page exhausted: return it, advance to the next page.
 			if err := s.pool.Unpin(tag); err != nil {
 				return nil, err
 			}
