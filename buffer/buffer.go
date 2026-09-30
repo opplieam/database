@@ -76,6 +76,7 @@ type BufferPool struct {
 	hits       int
 	misses     int
 	evictions  int
+	flushes    int
 }
 
 // PoolStats reports cache behavior for later cost-tracker wiring.
@@ -83,6 +84,7 @@ type PoolStats struct {
 	Hits      int
 	Misses    int
 	Evictions int
+	Flushes   int
 }
 
 // NewBufferPool creates a pool with the given slot count (minimum 1).
@@ -214,6 +216,7 @@ func (p *BufferPool) Stats() PoolStats {
 		Hits:      p.hits,
 		Misses:    p.misses,
 		Evictions: p.evictions,
+		Flushes:   p.flushes,
 	}
 }
 
@@ -287,6 +290,7 @@ func (p *BufferPool) flushSlot(idx int) error {
 		return err
 	}
 	s.desc.Dirty = false
+	p.flushes++
 	return nil
 }
 
