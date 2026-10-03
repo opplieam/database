@@ -1,196 +1,78 @@
-# Database Executor
+# Database: Learn DBMS Internals by Coding
 
-A simple DBMS built from scratch in Go. Not meant for production — only for learning how databases work internally.
+A from-scratch database in Go, built concept by concept to understand how
+databases work inside. Not production. Every topic pairs its interdb
+chapter with runnable code: read the concept, run the test, break things,
+inspect variables, repeat.
 
-## Main Resource
+Main source: interdb (a free PostgreSQL internals book) at https://www.interdb.jp/pg/.
 
-- **PostgreSQL Internals** — https://www.interdb.jp/pg/
+## How to learn with this repo
 
-## What You'll Learn
+Prerequisites: you should already use PostgreSQL a little, tables and
+inserts at least. This repo is about how the engine works inside, not
+how to write SQL.
 
-### Query Execution (Volcano Model)
-How databases process queries one row at a time. Each operator (scan, filter, sort) implements the same interface and pulls data from its child when asked.
-
-### Storage Engine
-How data lives on disk:
-- **Slotted pages** — Fixed 4096-byte pages with line pointers, null bitmaps, and records growing inward from both ends
-- **Record encoding** — Binary format with pascal strings (length-prefixed)
-- **Heap files** — Pages stacked sequentially, scanned front to back
-- **Buffer pool** — In-memory page cache with clock-sweep eviction, dirty tracking, pooled MVCC scan and insert
-
-### Indexing (B+ Tree)
-How databases speed up lookups:
-- **Insert/Search** — Navigate internal nodes to find the right leaf
-- **TID Pointers** — Index stores Tuple IDs (page + slot), not full tuples
-- **Range scan** — Leaf nodes are linked, so scanning 100-200 is just walking the list
-- **Delete** — Borrow/merge nodes to keep the tree balanced
-- **DeleteByTID** — Remove index entries pointing to a specific tuple (used by VACUUM)
-- **Persistence** — Save/load tree to/from disk
-
-### MVCC (Multi-Version Concurrency Control)
-How databases handle concurrent reads and writes:
-- **Versioned records** — Each record has TxMin (creator), TxMax (deleter), CID (command id)
-- **Visibility rules** — Determine which version a transaction can see
-- **Commit log (clog)** — Track which transactions committed/aborted
-- **Snapshot isolation** — Each transaction sees a consistent snapshot of data
-- **xip_list** — Snapshot of in-progress transactions at snapshot time (avoids seeing uncommitted changes)
-
-### Isolation Levels
-- **Repeatable Read** — xip_list fixed at transaction start, all statements see same data
-- **Read Committed** — xip_list refreshed at each statement via `NewStatement()`, may see different data
-
-### VACUUM (Garbage Collection)
-How databases clean up dead tuples:
-- **Dead tuple detection** — Scan heap to find tuples with committed deletions
-- **Freeze processing** — Prevent transaction ID wraparound by freezing old tuples
-- **Index cleanup** — Remove orphaned index entries pointing to dead tuples
-- **Heap cleanup** — Mark dead slots and update Free Space Map (FSM)
-
-### Query Operators
-Each operator is a small, composable unit:
-
-| Operator | What It Does |
-|----------|--------------|
-| `MemoryScan` | Iterates over an in-memory slice |
-| `HeapFileScan` | Reads binary slotted pages, supports MVCC visibility filtering |
-| `Selection` | Filters rows with a predicate |
-| `Projection` | Picks/transforms columns |
-| `Sort` | Buffers all rows, sorts, emits one at a time |
-| `Limit` | Stops after N rows |
-| `Insert` | Adds a record to a file, supports MVCC with automatic clog logging |
-| `BTreeScan` | Walks a B+ tree's linked leaves, uses TupleReader with MVCC visibility |
-
-## Project Structure
-
-```
-database/
-├── executors/            # Query operators
-├── storage/              # Pages, records, file I/O
-├── tx/                   # Transaction management, commit log
-├── btree/                # B+ tree index
-├── vacuum/               # VACUUM (garbage collection)
-├── learn/                # Entry point — run and test things here
-├── movies.csv            # Sample data (27K movies)
-└── go.mod
-```
-
-## How to Run
+1. Read the linked interdb chapter section.
+2. Run the linked `learn/` test with `-v` and read its step logs.
+3. Re-run one test with `-run` and inspect the code it exercises.
+4. Put a breakpoint in the test or the code under it and watch variables
+   change round by round (e.g. Delve: `dlv test ./learn -- -test.run TestBufferSuite -v`).
 
 ```bash
-# Unit tests (storage, executors, btree, tx, vacuum)
-go test ./...
-
-# Learn — run and step through code
-go test ./learn/... -v
+go test ./...                                # everything
+go test ./learn/ -v                          # step-by-step learning logs
+go test ./learn/ -run TestBufferSuite -v     # one topic at a time
 ```
 
-## Example Query
+## Topics
+
+- [Query operators](#query-operators) · [Storage](#storage) · [B+ tree index](#b-tree-index) · [MVCC and isolation](#mvcc-and-isolation) · [VACUUM](#vacuum) · [Buffer pool](#buffer-pool)
+
+Each topic is a simplified version of its interdb chapter for learning,
+not a port. The pattern is the same everywhere: single-threaded, no
+background processes, manual triggers where PostgreSQL uses daemons.
+
+### Query operators
+
+A query says which rows it wants. It never says how to fetch them. So
+every operator answers the same question, "give me your next row," and
+hands one row upward. Memory stays flat no matter the table size, because
+rows flow instead of piling up. The exception proves the rule: sort buffers
+everything, since the first row out cannot be known before the last row in.
+New operators snap in without touching old ones because the question never
+changes.
 
 ```go
-// Scan → filter Comedy → pick title → limit 5
-scan, _ := executors.NewHeapFileScan("movies.data")
+scan, _ := executors.NewHeapFileScan("movies.data", nil)
 filtered := executors.NewSelection(scan, func(t storage.Tuple) bool {
     return strings.Contains(t[2].(string), "Comedy")
 })
-projected := executors.NewProjection(filtered, func(t storage.Tuple) storage.Tuple {
-    return storage.Tuple{t[1]}
-})
-limited := executors.NewLimit(projected, 5)
-
-results, _ := executor.Run(limited)
-// → ["Toy Story (1995)", "Jumanji (1995)", ...]
+limited := executors.NewLimit(filtered, 5)
+results, _ := executors.Run(limited)
 ```
 
-## MVCC Example
+**Read:** [Ch 3](https://www.interdb.jp/pg/pgsql03.html)
 
-```go
-// Create commit log and TxManager
-clog, _ := tx.OpenCommitLog("clog.data")
-defer clog.Close()
-mgr := tx.NewTxManager()
+**Run:** `go test ./learn/ -run TestExecutorSuite -v` ([test](learn/executor_integration_test.go))
 
-// tx=1: INSERT with MVCC context
-tx1 := mgr.Begin(tx.RepeatableRead)
-ctx1 := &executors.TransactionContext{
-    Tx:       tx1,
-    Clog:     clog,
-    Snapshot: tx1.Id(),
-    XipList:  tx1.XipList(),
-}
+**Tested:** scan, selection, projection, and limit compose by hand into one
+chain (TestExecutorSuite). No operator holds resources between Next calls,
+so Limit can stop early without cleanup.
 
-// Insert record (automatically creates TxRecord and logs to clog)
-insert := executors.NewInsert("movies.data", storage.MovieRecord{
-    MovieId: 1,
-    Title:   "Toy Story",
-    Genres:  "Animation",
-}, 0, ctx1)
-insert.Next()
-mgr.Commit(tx1)
+**Limits:** no planner (composition is manual in tests) and no JOINs
+(parked under Ch 3 in the TODO).
 
-// tx=2: Scan with MVCC context (sees committed records)
-tx2 := mgr.Begin(tx.RepeatableRead)
-ctx2 := &executors.TransactionContext{
-    Tx:       tx2,
-    Clog:     clog,
-    Snapshot: tx2.Id(),
-    XipList:  tx2.XipList(),
-}
+### Storage
 
-scan, _ := executors.NewHeapFileScan("movies.data", ctx2)
-results, _ := executor.Run(scan)
-// → [{1, "Toy Story", "Animation"}]
-```
+A row needs an address that survives restarts. That address is page plus
+slot, written down as a TID like {Page 2, Slot 5}. Pages are fixed
+4096-byte boxes. Each box opens with a header (id, record count, free
+offset), then line pointers mapping slots to byte offsets, then the
+records packed from the rear. A sidecar file counts free bytes per page,
+so an insert finds room with one lookup instead of reading the whole file.
 
-## VACUUM Example
-
-```go
-// Create commit log
-clog, _ := tx.OpenCommitLog("clog.data")
-defer clog.Close()
-
-// Create B+ tree index (optional)
-bt := btree.NewBTree()
-bt.Insert(100, storage.TID{PageId: 0, SlotId: 0})
-bt.Insert(200, storage.TID{PageId: 0, SlotId: 1})
-
-// Run complete VACUUM
-// Parameters: heap file, commit log, index, FSM path, xip list, current txID, freeze age
-stats, err := vacuum.Vacuum("movies.data", clog, bt, "movies.fsm",
-    map[uint64]bool{}, 100, 50)
-
-fmt.Printf("Dead tuples: %d\n", stats.DeadTuples)
-fmt.Printf("Frozen tuples: %d\n", stats.FrozenTuples)
-fmt.Printf("Index entries removed: %d\n", stats.IndexEntries)
-```
-
-## Buffer Pool Example
-
-```go
-// 4-slot page cache
-pool := buffer.NewBufferPool(4)
-
-// Borrow page 0 (miss: loads from disk, pins the slot)
-tag := buffer.BufferTag{Path: "movies.data", PageId: 0}
-page, _ := pool.Get(tag)
-
-// ... read or modify page ...
-
-// Flag modifications (bytes stay in memory)
-pool.MarkDirty(tag)
-
-// Return the page (pin released, slot evictable again)
-pool.Unpin(tag)
-
-// Manual checkpoint: every dirty page reaches disk
-pool.FlushAll()
-
-fmt.Printf("%+v\n", pool.Stats())
-// → {Hits:0 Misses:1 Evictions:0 Flushes:1}
-```
-
-## On-Disk Format
-
-### Page Layout (4096 bytes)
+Page layout (4096 bytes):
 
 ```
 ┌─────────────────────────────┐
@@ -216,16 +98,16 @@ fmt.Printf("%+v\n", pool.Stats())
 └─────────────────────────────┘
 ```
 
-### File Layout
+File layout:
 
 ```
-[4 bytes] record count
+[4 bytes] page count (uint32)
 [4096 bytes] page 0
 [4096 bytes] page 1
 ...
 ```
 
-### FSM File Layout (Free Space Map)
+FSM file layout (Free Space Map):
 
 ```
 [4 bytes] page count (uint32)
@@ -234,12 +116,27 @@ fmt.Printf("%+v\n", pool.Stats())
 ...
 ```
 
-**Purpose:** Track free space per page for O(1) INSERT lookup.
+Without FSM, INSERT scans all pages O(n). With FSM, one map lookup.
 
-**Without FSM:** INSERT scans all pages O(n)
-**With FSM:** INSERT does O(1) lookup
+**Read:** [Ch 1](https://www.interdb.jp/pg/pgsql01.html)
 
-### TID Layout (Tuple ID)
+**Run:** `go test ./learn/ -run TestHeapSuite -v` ([test](learn/heap_integration_test.go))
+
+**Tested:** a single record layout for all rows, and FSM lookups that find
+room with one map check (TestFSMIntegration).
+
+**Limits:** no TOAST (PostgreSQL's overflow storage for large fields), no
+compression, and no concurrent writers (single-threaded by design).
+
+### B+ tree index
+
+Reading every row works until the table grows. Then it falls over. The
+tree keeps integer keys sorted across leaf pages chained together, so a
+lookup or a range walks straight to its rows. Each key points at a heap
+address (a TID). Nothing fancier, which keeps the code small enough to
+read whole.
+
+TID layout (Tuple ID, what index entries point to):
 
 ```
 ┌─────────────────────────────────┐
@@ -251,9 +148,26 @@ fmt.Printf("%+v\n", pool.Stats())
 └─────────────────────────────────┘
 ```
 
-**Purpose:** Uniquely identify a tuple in a heap file. Used by indexes to point to tuples.
+**Read:** own design (no interdb chapter covers it)
 
-## TxRecord Layout
+**Run:** `go test ./learn/ -run TestBTreeSuite -v` ([test](learn/btree_integration_test.go))
+
+**Tested:** the tree survives restarts balanced through borrow and merge on
+delete plus save/load (TestBTreeSuite).
+
+**Limits:** integer keys only, no concurrent access, and leaves carry
+addresses rather than row data.
+
+### MVCC and isolation
+
+MVCC (Multi-Version Concurrency Control) lets readers not wait for
+writers. Each row version stamps who created it and who deleted it. A log on disk records how transactions ended.
+Every transaction takes a snapshot of the running set and judges each row
+against it. Snapshot per statement gives read committed. Snapshot once
+gives repeatable read. Old versions pile up because open snapshots still
+see them. That pile is the price of never waiting, and VACUUM collects it.
+
+TxRecord layout (versioned record):
 
 ```
 ┌─────────────────────────────────────────┐
@@ -267,17 +181,112 @@ fmt.Printf("%+v\n", pool.Stats())
 └─────────────────────────────────────────┘
 ```
 
+**Read:** [Ch 5](https://www.interdb.jp/pg/pgsql05.html)
+
+**Run:** `go test ./learn/ -run TestMvccSuite -v` ([integration](learn/mvcc_integration_test.go))
+
+**Run:** `go test ./learn/ -run TestMvccInsertSuite -v` ([insert](learn/mvcc_insert_test.go))
+
+**Tested:** snapshots list in-progress transactions (xip_list), and that
+list is what separates read committed from repeatable read
+(TestMvccSuite). Committed inserts stay visible across transactions
+(TestMvccInsertSuite).
+
+**Limits:** no serializable isolation, and no UPDATE or DELETE yet, so row
+locks and lost-update handling wait for writers (see write-side
+concurrency in the TODO).
+
+### VACUUM
+
+This database needs maintenance, because nothing overwrites here. Every
+update inserts a brand-new version and stamps the old one deleted, so dead
+rows accumulate and scans slow down stepping over them. VACUUM walks the
+heap on demand and finds what no transaction can still see. It hands the
+space back to the free-space map, freezes ancient transaction ids so the
+counter never wraps, and removes index entries pointing at dead rows. No
+daemon exists yet. Someone runs it by hand.
+
+**Read:** [Ch 6](https://www.interdb.jp/pg/pgsql06.html)
+
+**Run:** `go test ./learn/ -run TestVacuumSuite -v` ([test](learn/vacuum_integration_test.go))
+
+**Tested:** dead detection (TestIsDead, TestScanHeap), freezing
+(TestShouldFreeze, TestApplyFreezes), index and heap cleanup
+(TestVacuumIndexes, TestVacuumHeap, TestFullVacuumFlow), and cost tracking
+on real pool counters (TestCostReporterThrottles).
+
+**Limits:** no VACUUM FULL, no visibility map, no autovacuum daemon. Costs
+accrue through Sync, but VACUUM still reads around the pool instead of
+through it.
+
+### Buffer pool
+
+Disk is slow and memory is not. Reading the same page twice from
+disk wastes the gap between them. The pool holds a few pages in memory.
+Second reads find them there. Writes scribble on the copy and mark it
+dirty. Disk catches up on eviction or when someone calls flush. Every
+borrow pairs Get with Unpin. Tests check the pairing holds even when a
+limit abandons a scan halfway.
+
+```go
+pool := buffer.NewBufferPool(4)
+tag := buffer.BufferTag{Path: "movies.data", PageId: 0}
+page, _ := pool.Get(tag)   // borrow (miss: loads from disk)
+pool.MarkDirty(tag)        // modify in memory, disk untouched
+pool.Unpin(tag)            // return (evictable again)
+pool.FlushAll()            // manual checkpoint
+```
+
+**Read:** [Ch 8](https://www.interdb.jp/pg/pgsql08.html)
+
+**Run:** `go test ./learn/ -run TestBufferSuite -v` ([test](learn/buffer_integration_test.go))
+
+**Tested:** eviction picks victims with a rotating clock hand
+(TestClockSweep). Every borrow is paired with Unpin, even when a scan
+gives up halfway (TestPoolHeapScanMVCCAbandoned). Dirty pages stay in
+memory until flush (TestPoolInsertMVCCFlushDurability).
+
+**Limits:** no WAL (write-ahead log) or checkpoints behind flushes. A crash
+loses dirty pages (TestPoolInsertMVCCUnflushedLoss). Single-threaded, so no
+locks. No async I/O.
+
+## Project Structure
+
+```
+database/
+├── executors/            # Query operators (scan, filter, sort, limit, insert)
+├── storage/              # Pages, records, heap files, FSM
+├── tx/                   # Transactions, commit log (clog)
+├── btree/                # B+ tree index (keys + TIDs, linked leaves)
+├── vacuum/               # VACUUM, cost tracker, cost reporter
+├── buffer/               # Buffer pool (clock sweep, dirty tracking)
+├── learn/                # Runnable study notes: run with go test ./learn/ -v
+├── movies.csv            # Sample data
+└── go.mod
+```
+
 ## TODO
 
-- [x] Refactor all tests + `cmd/main.go` into proper `_test.go` files
-- [x] Integrate transactions into executors (automatic clog logging)
-- [x] VACUUM (dead tuple detection, freeze processing, index/heap vacuuming)
-- [x] xip_list (snapshot of in-progress transactions)
+### Query processing ([Ch 3](https://www.interdb.jp/pg/pgsql03.html))
 - [ ] Query Planner (rule-based scan selection, cost estimation)
 - [ ] JOIN operators (Nested Loop, Hash Join, Sort-Merge Join)
-- [x] Buffer Pool (page cache, clock-sweep eviction, dirty tracking, manual flush)
-- [ ] Cost-based throttling integration (after buffer pool is implemented)
-- [ ] Write-Ahead Logging (WAL)
-- [ ] Write-side concurrency (needs UPDATE/DELETE executors first; then lost-update prevention per 5.8, SELECT FOR UPDATE row locks)
-- [ ] HOT (needs UPDATE/DELETE executors, same-page version chaining, skip-index rule for unchanged indexed columns, scan and VACUUM awareness)
-- [ ] Index-Only Scans (needs VM with per-page all-visible bits, VM maintenance, covering index payloads, BTreeScan path with heap fallback)
+
+### Concurrency ([Ch 5](https://www.interdb.jp/pg/pgsql05.html))
+- [x] MVCC (TxMin/TxMax/CID, clog, snapshots, xip_list, both isolation levels)
+- [ ] Write-side concurrency (needs UPDATE/DELETE executors first; then lost-update prevention per [5.8](https://www.interdb.jp/pg/pgsql05/08.html), SELECT FOR UPDATE row locks; SSI, serializable snapshot isolation, dropped as out of scope)
+
+### VACUUM ([Ch 6](https://www.interdb.jp/pg/pgsql06.html))
+- [x] Dead tuple detection, freeze processing, index and heap vacuuming
+- [x] Cost tracker and reporter (standalone; fires on real pool activity)
+- [ ] Throttled VACUUM integration (needs VACUUM reading through the pool)
+
+### Buffer manager ([Ch 8](https://www.interdb.jp/pg/pgsql08.html))
+- [x] Buffer pool (page cache, clock-sweep eviction, dirty tracking, manual flush)
+- [x] Pooled MVCC scan and insert (separate structs, legacy paths untouched)
+
+### Storage and indexing ([Ch 1](https://www.interdb.jp/pg/pgsql01.html), [Ch 7](https://www.interdb.jp/pg/pgsql07.html))
+- [ ] HOT, heap-only tuples (needs UPDATE/DELETE executors, same-page version chaining, skip-index rule)
+- [ ] Index-Only Scans (needs a visibility map (VM) with all-visible bits, covering payloads, heap fallback)
+
+### WAL ([Ch 9](https://www.interdb.jp/pg/pgsql09.html))
+- [ ] Write-Ahead Logging (durability for dirty pages, recovery, then checkpoints)
