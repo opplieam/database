@@ -16,6 +16,7 @@ How data lives on disk:
 - **Slotted pages** — Fixed 4096-byte pages with line pointers, null bitmaps, and records growing inward from both ends
 - **Record encoding** — Binary format with pascal strings (length-prefixed)
 - **Heap files** — Pages stacked sequentially, scanned front to back
+- **Buffer pool** — In-memory page cache with clock-sweep eviction, dirty tracking, pooled MVCC scan and insert
 
 ### Indexing (B+ Tree)
 How databases speed up lookups:
@@ -162,6 +163,31 @@ fmt.Printf("Frozen tuples: %d\n", stats.FrozenTuples)
 fmt.Printf("Index entries removed: %d\n", stats.IndexEntries)
 ```
 
+## Buffer Pool Example
+
+```go
+// 4-slot page cache
+pool := buffer.NewBufferPool(4)
+
+// Borrow page 0 (miss: loads from disk, pins the slot)
+tag := buffer.BufferTag{Path: "movies.data", PageId: 0}
+page, _ := pool.Get(tag)
+
+// ... read or modify page ...
+
+// Flag modifications (bytes stay in memory)
+pool.MarkDirty(tag)
+
+// Return the page (pin released, slot evictable again)
+pool.Unpin(tag)
+
+// Manual checkpoint: every dirty page reaches disk
+pool.FlushAll()
+
+fmt.Printf("%+v\n", pool.Stats())
+// → {Hits:0 Misses:1 Evictions:0 Flushes:1}
+```
+
 ## On-Disk Format
 
 ### Page Layout (4096 bytes)
@@ -249,7 +275,7 @@ fmt.Printf("Index entries removed: %d\n", stats.IndexEntries)
 - [x] xip_list (snapshot of in-progress transactions)
 - [ ] Query Planner (rule-based scan selection, cost estimation)
 - [ ] JOIN operators (Nested Loop, Hash Join, Sort-Merge Join)
-- [ ] Buffer Pool (LRU cache, page eviction, flush clog/memory to disk)
+- [x] Buffer Pool (page cache, clock-sweep eviction, dirty tracking, manual flush)
 - [ ] Cost-based throttling integration (after buffer pool is implemented)
 - [ ] Write-Ahead Logging (WAL)
 - [ ] Write-side concurrency (needs UPDATE/DELETE executors first; then lost-update prevention per 5.8, SELECT FOR UPDATE row locks)
