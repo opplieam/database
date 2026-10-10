@@ -7,6 +7,7 @@ import (
 
 	"database/buffer"
 	"database/storage"
+	"database/wal"
 )
 
 // PoolInsertMVCC inserts one record through the buffer pool.
@@ -97,7 +98,13 @@ func (in *PoolInsertMVCC) Next() (storage.Tuple, error) {
 		return nil, err
 	}
 
-	// Step 4: auto-log commit, same as legacy Insert.
+	// Step 4: commit with write-ahead ordering. The commit record joins
+	// the log, the log syncs to disk, and only then does the CLOG mark
+	// committed. A crash between sync and mark replays rows that stay
+	// invisible: consistent, never committed-and-lost.
+	if err := in.appendCommit(); err != nil {
+		return nil, err
+	}
 	if err := in.ctx.Clog.LogCommit(in.ctx.Tx.Id()); err != nil {
 		return nil, err
 	}
@@ -109,6 +116,41 @@ func (in *PoolInsertMVCC) Next() (storage.Tuple, error) {
 // spaceNeeded mirrors Page.AddRecord: line pointer plus null bitmap plus bytes.
 func spaceNeeded(encoded []byte) int {
 	return 4 + 1 + len(encoded)
+}
+
+// appendWAL logs the fresh record and stamps the page with its LSN.
+// Slot is RecordCount - 1: the row just added. Pools without WAL skip
+// silently, keeping legacy behavior with LSN zero.
+func (in *PoolInsertMVCC) appendWAL(pid uint32, page *storage.Page, encoded []byte) error {
+	seg := in.pool.WAL()
+	if seg == nil {
+		return nil
+	}
+	slot := uint16(page.Header.RecordCount - 1)
+	rec := &wal.Record{
+		Xid:     in.ctx.Tx.Id(),
+		Type:    wal.RecordInsert,
+		Payload: wal.PayloadInsert(pid, slot, in.bitmap, encoded),
+	}
+	lsn, err := seg.Append(rec)
+	if err != nil {
+		return err
+	}
+	page.Header.LSN = uint64(lsn)
+	return nil
+}
+
+// appendCommit writes the commit record and flushes the log. Pools
+// without WAL skip both, keeping legacy behavior.
+func (in *PoolInsertMVCC) appendCommit() error {
+	seg := in.pool.WAL()
+	if seg == nil {
+		return nil
+	}
+	if _, err := seg.Append(&wal.Record{Xid: in.ctx.Tx.Id(), Type: wal.RecordCommit}); err != nil {
+		return err
+	}
+	return seg.Flush()
 }
 
 // createFile makes an empty heap file; placeRecord appends pages to it.
@@ -165,6 +207,10 @@ func (in *PoolInsertMVCC) placeRecord(encoded []byte) error {
 				_ = in.pool.Unpin(tag)
 				return errors.New("executors: record does not fit")
 			}
+			if err := in.appendWAL(pid, page, encoded); err != nil {
+				_ = in.pool.Unpin(tag)
+				return err
+			}
 			if err := in.pool.MarkDirty(tag); err != nil {
 				_ = in.pool.Unpin(tag)
 				return err
@@ -189,6 +235,10 @@ func (in *PoolInsertMVCC) placeRecord(encoded []byte) error {
 	if !page.AddRecord(encoded, in.bitmap) {
 		_ = in.pool.Unpin(tag)
 		return errors.New("executors: record too large for page")
+	}
+	if err := in.appendWAL(pid, page, encoded); err != nil {
+		_ = in.pool.Unpin(tag)
+		return err
 	}
 	if err := in.pool.MarkDirty(tag); err != nil {
 		_ = in.pool.Unpin(tag)

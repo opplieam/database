@@ -39,6 +39,7 @@ import (
 	"fmt"
 
 	"database/storage"
+	"database/wal"
 )
 
 // maxUsageCount caps clock-sweep popularity, copied from PostgreSQL's
@@ -73,6 +74,7 @@ type BufferPool struct {
 	slots      []slot
 	index      map[BufferTag]int
 	nextVictim int
+	walSeg     *wal.Segment // nil = no WAL attached, legacy behavior
 	hits       int
 	misses     int
 	evictions  int
@@ -97,6 +99,13 @@ func NewBufferPool(size int) *BufferPool {
 		index: make(map[BufferTag]int),
 	}
 }
+
+// SetWAL attaches a WAL segment opened by the caller. Setup owns the
+// file; the pool only borrows it. Pools without one behave as before.
+func (p *BufferPool) SetWAL(seg *wal.Segment) { p.walSeg = seg }
+
+// WAL returns the attached segment, or nil when detached.
+func (p *BufferPool) WAL() *wal.Segment { return p.walSeg }
 
 // Get returns the page for tag and pins it.
 //
@@ -280,6 +289,14 @@ func (p *BufferPool) flushSlot(idx int) error {
 	s := &p.slots[idx]
 	if !s.desc.Valid || !s.desc.Dirty {
 		return nil
+	}
+	// Write-ahead rule: the log describing this page must be durable
+	// before the page itself. Eviction, Flush, and FlushAll all funnel
+	// through here, so one call covers every page-write path.
+	if p.walSeg != nil {
+		if err := p.walSeg.Flush(); err != nil {
+			return err
+		}
 	}
 	f, err := storage.Open(s.desc.Tag.Path)
 	if err != nil {

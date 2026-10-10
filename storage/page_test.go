@@ -13,7 +13,7 @@ func TestNewPage(t *testing.T) {
 
 	assert.Equal(t, uint32(42), page.Header.PageId)
 	assert.Equal(t, uint16(0), page.Header.RecordCount)
-	assert.Equal(t, uint16(8), page.Header.FreeOffset)
+	assert.Equal(t, uint16(16), page.Header.FreeOffset)
 	assert.Empty(t, page.LinePointers)
 	assert.Empty(t, page.NullBitmaps)
 	assert.Empty(t, page.Records)

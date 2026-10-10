@@ -98,8 +98,12 @@ func (cl *CommitLog) append(txId uint64, status ClogStatus) error {
 	binary.LittleEndian.PutUint64(buf[0:], txId)
 	buf[8] = byte(status)
 
-	_, err := cl.file.Write(buf)
-	return err
+	if _, err := cl.file.Write(buf); err != nil {
+		return err
+	}
+	// Sync the mark: it must be as durable as the WAL flush preceding it,
+	// or a crash could leave committed status with a lost log.
+	return cl.file.Sync()
 }
 
 // load reads all records from disk into memory.

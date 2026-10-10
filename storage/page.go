@@ -9,10 +9,12 @@ const PageSize = 4096
 
 // Page layout:
 // ┌─────────────────────────┐ ← offset 0
-// │ Page Header (8 bytes)   │
+// │ Page Header (16 bytes)  │
 // │   - page id (4 bytes)   │
 // │   - record count (2)    │
 // │   - free offset (2)     │
+// │   - LSN (8 bytes)       │
+// │     last WAL record touching this page; 0 = none yet
 // ├─────────────────────────┤
 // │ Line Pointers           │ → grow forward →
 // │   - offset (2 bytes)    │
@@ -26,9 +28,10 @@ const PageSize = 4096
 // └─────────────────────────┘
 
 type PageHeader struct {
-	PageId     uint32
+	PageId      uint32
 	RecordCount uint16
-	FreeOffset uint16
+	FreeOffset  uint16
+	LSN         uint64 // last WAL record modifying this page, 0 if none
 }
 
 type LinePointer struct {
@@ -50,7 +53,7 @@ func NewPage(pageId uint32) *Page {
 		Header: PageHeader{
 			PageId:     pageId,
 			RecordCount: 0,
-			FreeOffset: 8, // after header
+			FreeOffset: 16, // after header
 		},
 		LinePointers: nil,
 		Records:      nil,
@@ -62,11 +65,11 @@ func NewPage(pageId uint32) *Page {
 // Example: adding record with nullBitmap = 2 (0b010 = title is NULL)
 //
 // Before:
-//   FreeOffset = 8 (just header)
+//   FreeOffset = 16 (just header)
 //   Records = empty
 //
 // After:
-//   FreeOffset = 13 (8 + 4 line pointer + 1 null bitmap)
+//   FreeOffset = 21 (16 + 4 line pointer + 1 null bitmap)
 //   LinePointers = [{offset:4074, length:22}]
 //   NullBitmaps = [2]
 //   Records = [22 bytes of record data]
@@ -144,34 +147,35 @@ func IsNull(nullBitmap uint8, column int) bool {
 //   - the record itself (recordLen bytes)
 //
 // Layout grows from both ends:
-//   Line pointers + null bitmaps → grow forward from offset 8
+//   Line pointers + null bitmaps → grow forward from offset 16
 //   Records → grow backward from offset 4096
 //
 // They meet in the middle = free space. If they would overlap, page is full.
 //
 // Example: page with 48 records, each ~30 bytes
-//   FreeOffset = 8 + (48 × 5) = 248 bytes (header + line ptrs + null bitmaps)
+//   FreeOffset = 16 + (48 × 5) = 256 bytes (header + line ptrs + null bitmaps)
 //   Records = 48 × 30 = 1440 bytes
 //   Records start at 4096 - 1440 = 2656
-//   Free space = 2656 - 248 = 2408 bytes
-//   HasSpace(30) → 248 + 5 + 30 = 283 ≤ 2656 → true
+//   Free space = 2656 - 256 = 2400 bytes
+//   HasSpace(30) → 256 + 5 + 30 = 291 ≤ 2656 → true
 //
 // Example: page with 50 records (full)
-//   FreeOffset = 8 + (50 × 5) = 258
+//   FreeOffset = 16 + (50 × 5) = 266
 //   Records = 50 × 30 = 1500
 //   Records start at 4096 - 1500 = 2596
-//   Free space = 2596 - 258 = 2338
-//   HasSpace(30) → 258 + 5 + 30 = 293 ≤ 2596 → true (still fits)
+//   Free space = 2596 - 266 = 2330 bytes
+//   HasSpace(30) → 266 + 5 + 30 = 301 ≤ 2596 → true (still fits)
 //
 // Example: page with 51 records (truly full)
-//   FreeOffset = 8 + (51 × 5) = 263
+//   FreeOffset = 16 + (51 × 5) = 271
 //   Records = 51 × 30 = 1530
 //   Records start at 4096 - 1530 = 2566
-//   HasSpace(30) → 263 + 5 + 30 = 298 ≤ 2566 → true
+//   Free space = 2566 - 271 = 2295 bytes
+//   HasSpace(30) → 271 + 5 + 30 = 306 ≤ 2566 → true
 //
 // Wait, 50 records at 30 bytes each = 1500. 4096 - 1500 = 2596.
-// Line pointers: 50 × 4 = 200. Null bitmaps: 50 × 1 = 50. Total: 250 + 8 = 258.
-// 258 + 5 = 263. 263 + 30 = 293. 293 ≤ 2596 → true. Still fits!
+// Line pointers: 50 × 4 = 200. Null bitmaps: 50 × 1 = 50. Total: 250 + 16 = 266.
+// 266 + 5 = 271. 271 + 30 = 301. 301 ≤ 2596 → true. Still fits!
 //
 // Actually 50 records fits because each record is 30 bytes, and line ptr + null bitmap is 5 bytes.
 // So we can fit about 4096 / 35 ≈ 117 records per page (theoretical max).
@@ -189,16 +193,16 @@ func (p *Page) HasSpace(recordLen int) bool {
 // Free space = where records start - where metadata ends
 //
 // Example: page with 48 records of 30 bytes each
-//   FreeOffset = 8 + (48 × 5) = 248
+//   FreeOffset = 16 + (48 × 5) = 256
 //   Records = 48 × 30 = 1440
 //   Records start at 4096 - 1440 = 2656
-//   Free space = 2656 - 248 = 2408 bytes
+//   Free space = 2656 - 256 = 2400 bytes
 //
 // Example: empty page
-//   FreeOffset = 8 (just header)
+//   FreeOffset = 16 (just header)
 //   Records = 0
 //   Records start at 4096
-//   Free space = 4096 - 8 = 4088 bytes
+//   Free space = 4096 - 16 = 4080 bytes
 func (p *Page) GetFreeSpace() int {
 	recordsStart := PageSize - len(p.Records)
 	return recordsStart - int(p.Header.FreeOffset)
@@ -300,20 +304,21 @@ func (p *Page) FreezeTuple(index int, newTxMin uint64) error {
 //
 // On-disk layout (4096 bytes total):
 // ┌─────────────────────────────────────────────────────────────┐
-// │ Page Header (8 bytes)                                       │
+// │ Page Header (16 bytes)                                      │
 // │   [0-3]  PageId = 0x00000000                                │
 // │   [4-5]  RecordCount = 0x0002 (2 records)                   │
-// │   [6-7]  FreeOffset = 0x0012 (18 = 8 + 4×2 + 1×2)          │
+// │   [6-7]  FreeOffset = 0x001A (26 = 16 + 4×2 + 1×2)         │
+// │   [8-15] LSN = last WAL record touching this page           │
 // ├─────────────────────────────────────────────────────────────┤
 // │ Line Pointers (8 bytes for 2 records)                       │
-// │   [8-11]  Record 0: offset=4074, length=22                  │
-// │   [12-15] Record 1: offset=4052, length=20                  │
+// │   [16-19] Record 0: offset=4074, length=22                  │
+// │   [20-23] Record 1: offset=4052, length=20                  │
 // ├─────────────────────────────────────────────────────────────┤
 // │ Null Bitmaps (2 bytes for 2 records)                        │
-// │   [16] Record 0: nullBitmap=0 (no NULLs)                    │
-// │   [17] Record 1: nullBitmap=2 (title is NULL)               │
+// │   [24] Record 0: nullBitmap=0 (no NULLs)                    │
+// │   [25] Record 1: nullBitmap=2 (title is NULL)               │
 // ├─────────────────────────────────────────────────────────────┤
-// │ Free Space (4052-16 = 4036 bytes)                           │
+// │ Free Space (4052-26 = 4026 bytes)                           │
 // ├─────────────────────────────────────────────────────────────┤
 // │ Records (grow backward from end)                            │
 // │   [4052-4072] Record 1 (20 bytes)                           │
@@ -330,6 +335,8 @@ func (p *Page) Encode() []byte {
 	offset += 2
 	binary.LittleEndian.PutUint16(data[offset:], p.Header.FreeOffset)
 	offset += 2
+	binary.LittleEndian.PutUint64(data[offset:], p.Header.LSN)
+	offset += 8
 
 	// write line pointers
 	for _, lp := range p.LinePointers {
@@ -367,6 +374,8 @@ func DecodePage(data []byte) (*Page, error) {
 	offset += 2
 	p.Header.FreeOffset = binary.LittleEndian.Uint16(data[offset:])
 	offset += 2
+	p.Header.LSN = binary.LittleEndian.Uint64(data[offset:])
+	offset += 8
 
 	// read line pointers
 	p.LinePointers = make([]LinePointer, p.Header.RecordCount)

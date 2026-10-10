@@ -153,6 +153,10 @@ func (m *TxManager) Commit(tx *Transaction) {
 	delete(m.active, tx.Id())
 }
 
+// NextID returns the next transaction id to hand out without allocating
+// it. Checkpoint saves it so recovery restores the counter past reuse.
+func (m *TxManager) NextID() uint64 { return m.nextId }
+
 // Rollback aborts a transaction and removes it from active tracking.
 func (m *TxManager) Rollback(tx *Transaction) {
 	tx.Rollback()

@@ -27,7 +27,7 @@ go test ./learn/ -run TestBufferSuite -v     # one topic at a time
 
 ## Topics
 
-- [Query operators](#query-operators) · [Storage](#storage) · [B+ tree index](#b-tree-index) · [MVCC and isolation](#mvcc-and-isolation) · [VACUUM](#vacuum) · [Buffer pool](#buffer-pool)
+- [Query operators](#query-operators) · [Storage](#storage) · [B+ tree index](#b-tree-index) · [MVCC and isolation](#mvcc-and-isolation) · [VACUUM](#vacuum) · [Buffer pool](#buffer-pool) · [WAL and crash recovery](#wal-and-crash-recovery)
 
 Each topic is a simplified version of its interdb chapter for learning,
 not a port. The pattern is the same everywhere: single-threaded, no
@@ -76,10 +76,11 @@ Page layout (4096 bytes):
 
 ```
 ┌─────────────────────────────┐
-│ Page Header (8 bytes)       │
+│ Page Header (16 bytes)      │
 │   pageId      [0-3]        │
 │   recordCount [4-5]        │
 │   freeOffset  [6-7]        │
+│   pageLSN     [8-15]       │
 ├─────────────────────────────┤
 │ Line Pointers (4 bytes each)│ → grow forward
 │   offset [0-1]              │
@@ -246,9 +247,47 @@ pool.FlushAll()            // manual checkpoint
 gives up halfway (TestPoolHeapScanMVCCAbandoned). Dirty pages stay in
 memory until flush (TestPoolInsertMVCCFlushDurability).
 
-**Limits:** no WAL (write-ahead log) or checkpoints behind flushes. A crash
-loses dirty pages (TestPoolInsertMVCCUnflushedLoss). Single-threaded, so no
-locks. No async I/O.
+**Limits:** attached pools flush WAL before pages; detached pools keep the
+old behavior and lose dirty pages on crash
+(TestPoolInsertMVCCUnflushedLoss). Single-threaded, so no locks. No async
+I/O.
+
+### WAL and crash recovery
+
+A crash used to erase changes still in memory. WAL adds a log file next to
+the data. Every insert appends a short record. Every commit appends a
+marker. The log syncs to disk before the commit counts, so a marked commit
+is never lost. Each page stamps its last change. A checkpoint saves changed
+pages to disk and records where replay starts. After a crash, recovery
+replays from that point and skips records the page already has. Nothing
+duplicates, nothing committed goes missing.
+
+```go
+seg, _ := wal.Open("movies.wal")
+pool := buffer.NewBufferPool(4)
+pool.SetWAL(seg)
+// ... pooled inserts, flushes ...
+wal.Checkpoint(pool, seg, "movies.ctl", mgr.NextID())
+// ... crash: drop the pool, reopen the log ...
+pool2 := buffer.NewBufferPool(4)
+pool2.Recover("movies.data", seg2, "movies.ctl")
+```
+
+**Read:** [Ch 9](https://www.interdb.jp/pg/pgsql09.html)
+
+**Run:** `go test ./learn/ -run TestWALSuite -v` ([test](learn/wal_integration_test.go))
+
+**Tested:** log syncs before CLOG marks committed
+(TestPoolInsertCommitsToWAL). Replay applies only newer records, skips
+flushed ones without duplicating (TestFlushedRecordSkipped,
+TestRecoverReplaysUnflushedRow). Checkpoints bound replay to the tail
+(TestCrashRecovery).
+
+**Limits:** one data file per recovery (payloads carry no file id). No
+abort records: aborted inserts would leave invisible orphans VACUUM must
+not freeze yet. No full-page writes, no archiving, no timelines, no
+background writer. Crash tests drop the pool in-process; the sync calls
+are real but no plug is pulled.
 
 ## Project Structure
 
@@ -259,7 +298,8 @@ database/
 ├── tx/                   # Transactions, commit log (clog)
 ├── btree/                # B+ tree index (keys + TIDs, linked leaves)
 ├── vacuum/               # VACUUM, cost tracker, cost reporter
-├── buffer/               # Buffer pool (clock sweep, dirty tracking)
+├── buffer/               # Buffer pool (clock sweep, dirty tracking, recovery)
+├── wal/                  # Write-ahead log (records, segment, checkpoint)
 ├── learn/                # Runnable study notes: run with go test ./learn/ -v
 ├── movies.csv            # Sample data
 └── go.mod
@@ -289,4 +329,6 @@ database/
 - [ ] Index-Only Scans (needs a visibility map (VM) with all-visible bits, covering payloads, heap fallback)
 
 ### WAL ([Ch 9](https://www.interdb.jp/pg/pgsql09.html))
-- [ ] Write-Ahead Logging (durability for dirty pages, recovery, then checkpoints)
+- [x] Write-Ahead Logging (LSN-stamped pages, commit ordering, checkpoints, replay)
+- [ ] Full-page writes (first-change-per-checkpoint page images, torn-write recovery)
+- [ ] Multi-file recovery (needs file id in insert payloads)
