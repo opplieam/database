@@ -72,7 +72,7 @@ func TestRecoverReplaysUnflushedRow(t *testing.T) {
 	require.NoError(t, err)
 	defer clog.Close()
 	poolB := NewBufferPool(4)
-	_, err = poolB.Recover(dataPath, seg2, ctl, clog, time.Time{})
+	_, _, err = poolB.Recover(dataPath, seg2, ctl, clog, time.Time{})
 	require.NoError(t, err)
 
 	// Both rows present exactly once, bitmap intact, stamp at row B.
@@ -103,7 +103,7 @@ func TestRecoverMissingControl(t *testing.T) {
 	require.NoError(t, err)
 	defer clog.Close()
 	pool := NewBufferPool(4)
-	_, err = pool.Recover(filepath.Join(dir, "nope.data"), seg, filepath.Join(dir, "missing.ctl"), clog, time.Time{})
+	_, _, err = pool.Recover(filepath.Join(dir, "nope.data"), seg, filepath.Join(dir, "missing.ctl"), clog, time.Time{})
 	assert.Error(t, err)
 }
 
@@ -162,7 +162,7 @@ func TestRecoverRebuildsClog(t *testing.T) {
 	require.NoError(t, err)
 	defer seg2.Close()
 	poolB := NewBufferPool(4)
-	_, err = poolB.Recover(dataPath, seg2, ctl, clog, time.Time{})
+	_, _, err = poolB.Recover(dataPath, seg2, ctl, clog, time.Time{})
 	require.NoError(t, err)
 
 	assert.True(t, clog.IsCommitted(7), "replay must rebuild the commit mark")
@@ -213,7 +213,7 @@ func TestRecoverAdvancesNextXid(t *testing.T) {
 	require.NoError(t, err)
 	defer seg2.Close()
 	poolB := NewBufferPool(4)
-	nextXid, err := poolB.Recover(filepath.Join(dir, "unused.data"), seg2, ctl, clog, time.Time{})
+	nextXid, _, err := poolB.Recover(filepath.Join(dir, "unused.data"), seg2, ctl, clog, time.Time{})
 	require.NoError(t, err)
 
 	// 9 was spent, so the next free id is 10. The checkpoint's 5 is stale.
@@ -247,7 +247,7 @@ func TestRecoverKeepsCheckpointCounter(t *testing.T) {
 	require.NoError(t, err)
 	defer seg2.Close()
 	poolB := NewBufferPool(4)
-	nextXid, err := poolB.Recover(filepath.Join(dir, "unused.data"), seg2, ctl, clog, time.Time{})
+	nextXid, _, err := poolB.Recover(filepath.Join(dir, "unused.data"), seg2, ctl, clog, time.Time{})
 	require.NoError(t, err)
 
 	assert.Equal(t, uint64(20), nextXid, "the checkpoint's counter is the floor")
@@ -259,8 +259,9 @@ var targetBase = time.Unix(1_700_000_000, 0)
 
 // buildFourCommits writes four single-row transactions one second apart,
 // all after the checkpoint, then drops the pool unflushed so a restore has
-// to replay them. Returns the paths a restore needs.
-func buildFourCommits(t *testing.T, dir string) (dataPath, ctl, walPath string) {
+// to replay them. Returns the paths a restore needs and the commit LSNs,
+// so a target test can name which commit replay should stop at.
+func buildFourCommits(t *testing.T, dir string) (dataPath, ctl, walPath string, commitLSNs []wal.LSN) {
 	t.Helper()
 	dataPath = filepath.Join(dir, "crash.data")
 	ctl = filepath.Join(dir, "test.ctl")
@@ -295,14 +296,15 @@ func buildFourCommits(t *testing.T, dir string) (dataPath, ctl, walPath string) 
 			Payload: wal.PayloadInsert(0, slot, 0, row)})
 		require.NoError(t, err)
 		page.Header.LSN = uint64(lsn)
-		_, err = seg.Append(&wal.Record{Xid: xid, Type: wal.RecordCommit,
+		commitLSN, err := seg.Append(&wal.Record{Xid: xid, Type: wal.RecordCommit,
 			Payload: wal.PayloadCommit(targetBase.Add(time.Duration(i) * time.Second).UnixNano())})
 		require.NoError(t, err)
+		commitLSNs = append(commitLSNs, commitLSN)
 	}
 	require.NoError(t, pool.MarkDirty(tag))
 	require.NoError(t, pool.Unpin(tag))
 	require.NoError(t, seg.Close())
-	return dataPath, ctl, walPath
+	return dataPath, ctl, walPath, commitLSNs
 }
 
 // Replay ends at the first commit whose timestamp exceeds the target, so a
@@ -322,7 +324,7 @@ func TestRecoverStopsAtTarget(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			dataPath, ctl, walPath := buildFourCommits(t, dir)
+			dataPath, ctl, walPath, _ := buildFourCommits(t, dir)
 
 			clog, err := tx.OpenCommitLog(filepath.Join(dir, "test.clog"))
 			require.NoError(t, err)
@@ -332,7 +334,7 @@ func TestRecoverStopsAtTarget(t *testing.T) {
 			require.NoError(t, err)
 			defer seg.Close()
 			pool := NewBufferPool(4)
-			_, err = pool.Recover(dataPath, seg, ctl, clog, tc.target)
+			_, _, err = pool.Recover(dataPath, seg, ctl, clog, tc.target)
 			require.NoError(t, err)
 
 			// Visibility, not row count, is what an operator sees. Each
@@ -355,4 +357,35 @@ func TestRecoverStopsAtTarget(t *testing.T) {
 			assert.Equal(t, tc.want, visible)
 		})
 	}
+}
+
+// Replay reports the stop point: the first commit refused as past the
+// target, or the log end when nothing was refused. A restore cuts the
+// working log there, so skipped history never replays again.
+func TestRecoverReportsStopLSN(t *testing.T) {
+	dir := t.TempDir()
+	dataPath, ctl, walPath, commitLSNs := buildFourCommits(t, dir)
+	clog, err := tx.OpenCommitLog(filepath.Join(dir, "test.clog"))
+	require.NoError(t, err)
+	defer clog.Close()
+
+	// Target between commits two and three: the third commit is the
+	// first strictly past it.
+	seg, err := wal.Open(walPath)
+	require.NoError(t, err)
+	pool := NewBufferPool(4)
+	_, stopLSN, err := pool.Recover(dataPath, seg, ctl, clog,
+		targetBase.Add(2500*time.Millisecond))
+	require.NoError(t, err)
+	assert.Equal(t, commitLSNs[2], stopLSN)
+	require.NoError(t, seg.Close())
+
+	// Zero target: everything replays and the stop is the log end.
+	seg2, err := wal.Open(walPath)
+	require.NoError(t, err)
+	defer seg2.Close()
+	pool2 := NewBufferPool(4)
+	_, stopLSN, err = pool2.Recover(dataPath, seg2, ctl, clog, time.Time{})
+	require.NoError(t, err)
+	assert.Equal(t, seg2.End(), stopLSN)
 }

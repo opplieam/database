@@ -118,3 +118,40 @@ func TestBadMagic(t *testing.T) {
 	_, err := Open(path)
 	assert.Error(t, err)
 }
+
+// Truncate cuts at a record boundary, rewinds the write tip so appends
+// grow back above the cut, and relinks the chain onto the surviving
+// last record.
+func TestTruncateCutsTail(t *testing.T) {
+	seg, err := Open(filepath.Join(t.TempDir(), "test.wal"))
+	require.NoError(t, err)
+	defer seg.Close()
+
+	r1 := &Record{Xid: 1, Type: RecordInsert, Payload: PayloadInsert(0, 0, 0, []byte{1})}
+	r2 := &Record{Xid: 1, Type: RecordCommit}
+	r3 := &Record{Xid: 2, Type: RecordInsert, Payload: PayloadInsert(0, 1, 0, []byte{2})}
+
+	lsn1, err := seg.Append(r1)
+	require.NoError(t, err)
+	lsn2, err := seg.Append(r2)
+	require.NoError(t, err)
+	if _, err := seg.Append(r3); err != nil {
+		t.Fatal(err)
+	}
+
+	// Cut at lsn2: r2 and r3 leave the file, r1 survives. End sits at
+	// the cut boundary, where r2 begins again on the next append.
+	require.NoError(t, seg.Truncate(lsn2))
+	assert.Equal(t, lsn2, seg.End())
+
+	// The next append lands on the cut and chains onto r1, proving the
+	// walk recaptured the survivor rather than the stale chain head.
+	lsn3, err := seg.Append(r3)
+	require.NoError(t, err)
+	assert.Equal(t, lsn2, lsn3)
+	assert.Equal(t, lsn1, r3.PrevLSN)
+
+	// Refusals: past the end and inside the magic both cut nothing.
+	assert.Error(t, seg.Truncate(seg.End()+1))
+	assert.Error(t, seg.Truncate(0))
+}

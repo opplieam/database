@@ -140,6 +140,26 @@ func (s *Segment) Close() error {
 	return s.file.Close()
 }
 
+// Truncate removes records from l to the end of the file, then walks
+// the file to recapture the resume point: the next Append chains onto
+// the last surviving record, not the one just cut. Refuses l beyond the
+// end or inside the magic: there is nothing to cut there, and a cut
+// interior to a record would corrupt every record after it.
+func (s *Segment) Truncate(l LSN) error {
+	if l > s.end || l < SegmentHeaderSize {
+		return fmt.Errorf("wal: cannot Truncate at LSN %d, end is %d", l, s.end)
+	}
+	if err := s.file.Truncate(int64(l)); err != nil {
+		return err
+	}
+	last, end, err := s.scan()
+	if err != nil {
+		return err
+	}
+	s.lastLSN, s.end = last, end
+	return s.file.Sync()
+}
+
 // scan walks records from after the magic, returning the last good
 // record's LSN and the end offset. Finds the resume point on open and
 // the truncation point for a torn tail.

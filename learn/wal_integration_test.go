@@ -113,7 +113,7 @@ func (s *WALSuite) TestCrashRecovery() {
 	s.Require().NoError(err)
 	defer seg2.Close()
 	pool2 := buffer.NewBufferPool(4)
-	nextXid, err := pool2.Recover(path, seg2, ctl, s.clog, time.Time{})
+	nextXid, _, err := pool2.Recover(path, seg2, ctl, s.clog, time.Time{})
 	s.Require().NoError(err)
 	s.mgr.SetNextID(nextXid)
 
@@ -163,7 +163,7 @@ func (s *WALSuite) TestFlushedRecordSkipped() {
 	s.Require().NoError(err)
 	defer seg2.Close()
 	pool2 := buffer.NewBufferPool(4)
-	nextXid, err := pool2.Recover(path, seg2, ctl, s.clog, time.Time{})
+	nextXid, _, err := pool2.Recover(path, seg2, ctl, s.clog, time.Time{})
 	s.Require().NoError(err)
 	s.mgr.SetNextID(nextXid)
 
