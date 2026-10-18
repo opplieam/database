@@ -13,10 +13,10 @@ import (
 func TestHeapFileScan(t *testing.T) {
 	// Create test file
 	movies := []storage.MovieRecord{
-		{1, "Toy Story", "Adventure"},
-		{2, "Jumanji", "Comedy"},
-		{3, "Grumpier Old Men", "Comedy"},
-		{4, "Heat", "Action"},
+		{MovieId: 1, Title: "Toy Story", Genres: "Adventure"},
+		{MovieId: 2, Title: "Jumanji", Genres: "Comedy"},
+		{MovieId: 3, Title: "Grumpier Old Men", Genres: "Comedy"},
+		{MovieId: 4, Title: "Heat", Genres: "Action"},
 	}
 
 	filename := "test_heap_scan.data"

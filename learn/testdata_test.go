@@ -4,14 +4,14 @@ import "database/storage"
 
 // testMovies is shared test data for integration tests.
 var testMovies = []storage.MovieRecord{
-	{1, "Toy Story", "Adventure|Animation"},
-	{2, "Jumanji", "Adventure|Children"},
-	{3, "Heat", "Action"},
-	{4, "Sabrina", "Comedy|Romance"},
-	{5, "Tom and Huck", "Adventure|Children"},
-	{6, "Sudden Death", "Action"},
-	{7, "GoldenEye", "Action|Adventure|Thriller"},
-	{8, "American President", "Comedy|Drama|Romance"},
-	{9, "Dracula", "Horror|Romance"},
-	{10, "Balto", "Animation|Children"},
+	{MovieId: 1, Title: "Toy Story", Genres: "Adventure|Animation"},
+	{MovieId: 2, Title: "Jumanji", Genres: "Adventure|Children"},
+	{MovieId: 3, Title: "Heat", Genres: "Action"},
+	{MovieId: 4, Title: "Sabrina", Genres: "Comedy|Romance"},
+	{MovieId: 5, Title: "Tom and Huck", Genres: "Adventure|Children"},
+	{MovieId: 6, Title: "Sudden Death", Genres: "Action"},
+	{MovieId: 7, Title: "GoldenEye", Genres: "Action|Adventure|Thriller"},
+	{MovieId: 8, Title: "American President", Genres: "Comedy|Drama|Romance"},
+	{MovieId: 9, Title: "Dracula", Genres: "Horror|Romance"},
+	{MovieId: 10, Title: "Balto", Genres: "Animation|Children"},
 }

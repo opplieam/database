@@ -104,7 +104,8 @@ func NewBufferPool(size int) *BufferPool {
 // file; the pool only borrows it. Pools without one behave as before.
 func (p *BufferPool) SetWAL(seg *wal.Segment) { p.walSeg = seg }
 
-// WAL returns the attached segment, or nil when detached.
+// WAL returns the segment given to SetWAL, or nil when the pool was
+// created without one.
 func (p *BufferPool) WAL() *wal.Segment { return p.walSeg }
 
 // Get returns the page for tag and pins it.
