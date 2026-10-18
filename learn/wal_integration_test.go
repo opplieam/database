@@ -3,6 +3,7 @@ package learn
 import (
 	"os"
 	"testing"
+	"time"
 
 	"database/buffer"
 	"database/executors"
@@ -112,7 +113,9 @@ func (s *WALSuite) TestCrashRecovery() {
 	s.Require().NoError(err)
 	defer seg2.Close()
 	pool2 := buffer.NewBufferPool(4)
-	s.Require().NoError(pool2.Recover(path, seg2, ctl))
+	nextXid, err := pool2.Recover(path, seg2, ctl, s.clog, time.Time{})
+	s.Require().NoError(err)
+	s.mgr.SetNextID(nextXid)
 
 	s.T().Logf("Step 6: All 3 rows visible exactly once through the fresh pool")
 	result := s.scanPooled(path, pool2)
@@ -160,7 +163,9 @@ func (s *WALSuite) TestFlushedRecordSkipped() {
 	s.Require().NoError(err)
 	defer seg2.Close()
 	pool2 := buffer.NewBufferPool(4)
-	s.Require().NoError(pool2.Recover(path, seg2, ctl))
+	nextXid, err := pool2.Recover(path, seg2, ctl, s.clog, time.Time{})
+	s.Require().NoError(err)
+	s.mgr.SetNextID(nextXid)
 
 	s.T().Logf("Step 5: Both rows present, A exactly once")
 	result := s.scanPooled(path, pool2)

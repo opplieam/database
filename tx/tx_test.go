@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTransaction(t *testing.T) {
@@ -95,4 +96,25 @@ func TestTxManagerMultiple(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		assert.False(t, mgr.IsActive(uint64(i+1)), "tx %d should be inactive", i+1)
 	}
+}
+
+func TestSetNextIDOnlyMovesForward(t *testing.T) {
+	mgr := NewTxManager()
+	mgr.Begin(RepeatableRead) // spends id 1, counter now 2
+	require.Equal(t, uint64(2), mgr.NextID())
+
+	// Recovery on a crash with nothing to replay returns zero. Taking it
+	// literally would rewind the counter onto ids living rows carry.
+	mgr.SetNextID(0)
+	assert.Equal(t, uint64(2), mgr.NextID())
+
+	mgr.SetNextID(1)
+	assert.Equal(t, uint64(2), mgr.NextID())
+
+	// A higher value from recovery moves it forward.
+	mgr.SetNextID(50)
+	assert.Equal(t, uint64(50), mgr.NextID())
+
+	// And the next Begin hands out the restored value.
+	assert.Equal(t, uint64(50), mgr.Begin(RepeatableRead).Id())
 }

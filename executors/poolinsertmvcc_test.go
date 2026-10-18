@@ -258,6 +258,11 @@ func TestPoolInsertCommitsToWAL(t *testing.T) {
 	assert.Equal(t, wal.LSN(0), recs[0].PrevLSN)
 	assert.Equal(t, lsns[0], recs[1].PrevLSN)
 
+	// The commit record carries the timestamp a restore stops on.
+	commitTime, err := wal.ParseCommit(recs[1].Payload)
+	require.NoError(t, err)
+	assert.Greater(t, commitTime, int64(0))
+
 	// CLOG marked committed after the log records.
 	assert.True(t, clog.IsCommitted(wtx.Id()))
 }

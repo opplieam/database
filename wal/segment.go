@@ -113,7 +113,7 @@ func (s *Segment) End() LSN { return s.end }
 
 // Iterate calls yield for each record from `from` to end of file, in
 // order. A torn tail stops iteration cleanly; yield's error aborts and
-// propagates. Early return from yield is the Ch 10 early-stop shape.
+// propagates, which is the caller's only way to stop early.
 func (s *Segment) Iterate(from LSN, yield func(LSN, *Record) error) error {
 	off := from
 	for {

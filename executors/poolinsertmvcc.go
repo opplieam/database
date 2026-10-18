@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"time"
 
 	"database/buffer"
 	"database/storage"
@@ -140,14 +141,17 @@ func (in *PoolInsertMVCC) appendWAL(pid uint32, page *storage.Page, encoded []by
 	return nil
 }
 
-// appendCommit writes the commit record and flushes the log. Pools
-// without WAL skip both, keeping legacy behavior.
+// appendCommit writes the commit record and flushes the log. A pool
+// without a segment attached skips both: durability is opt-in.
 func (in *PoolInsertMVCC) appendCommit() error {
 	seg := in.pool.WAL()
 	if seg == nil {
 		return nil
 	}
-	if _, err := seg.Append(&wal.Record{Xid: in.ctx.Tx.Id(), Type: wal.RecordCommit}); err != nil {
+	payload := wal.PayloadCommit(time.Now().UnixNano())
+	if _, err := seg.Append(&wal.Record{
+		Xid: in.ctx.Tx.Id(), Type: wal.RecordCommit, Payload: payload,
+	}); err != nil {
 		return err
 	}
 	return seg.Flush()

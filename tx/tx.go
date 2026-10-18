@@ -157,6 +157,15 @@ func (m *TxManager) Commit(tx *Transaction) {
 // it. Checkpoint saves it so recovery restores the counter past reuse.
 func (m *TxManager) NextID() uint64 { return m.nextId }
 
+// SetNextID moves the counter forward after recovery, so ids the log
+// already spent are never handed out a second time. A lower value is
+// ignored: rewinding would reuse ids that living rows still carry.
+func (m *TxManager) SetNextID(next uint64) {
+	if next > m.nextId {
+		m.nextId = next
+	}
+}
+
 // Rollback aborts a transaction and removes it from active tracking.
 func (m *TxManager) Rollback(tx *Transaction) {
 	tx.Rollback()

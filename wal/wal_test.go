@@ -28,7 +28,7 @@ func TestRecordRoundTrip(t *testing.T) {
 				Xid:     7,
 				Type:    RecordCommit,
 				PrevLSN: 41,
-				Payload: nil,
+				Payload: PayloadCommit(1735689600000000000),
 			},
 		},
 		{
@@ -94,4 +94,11 @@ func TestPayloadHelpers(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, LSN(512), redo)
 	assert.Equal(t, uint64(9), nextXid)
+
+	ts, err := ParseCommit(PayloadCommit(1735689600000000000))
+	require.NoError(t, err)
+	assert.Equal(t, int64(1735689600000000000), ts)
+
+	_, err = ParseCommit([]byte{1, 2, 3})
+	assert.Error(t, err)
 }

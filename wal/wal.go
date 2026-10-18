@@ -3,8 +3,9 @@
 // ## What we implement
 //
 // Record bytes: LSN addressing, three record types (insert, commit,
-// checkpoint), CRC32 framing. Pure encode/decode, no file I/O; the
-// segment file lives in segment.go.
+// checkpoint), CRC32 framing. Commits carry a timestamp so a restore
+// can stop on one. Pure encode/decode, no file I/O; the segment file
+// lives in segment.go.
 //
 // How it works:
 //  1. Callers build a Record with a typed payload
@@ -166,4 +167,25 @@ func ParseCheckpoint(payload []byte) (LSN, uint64, error) {
 	}
 	return LSN(binary.LittleEndian.Uint64(payload[0:])),
 		binary.LittleEndian.Uint64(payload[8:]), nil
+}
+
+// Commit payload layout, little-endian:
+//
+//	[0-7] commit_time: unix nanoseconds when the commit happened
+//
+// A restore stops on this field. PostgreSQL keeps the same value in
+// xl_xact_commit and compares it against recovery_target_time.
+func PayloadCommit(ts int64) []byte {
+	payload := make([]byte, 8)
+	binary.LittleEndian.PutUint64(payload[0:], uint64(ts))
+	return payload
+}
+
+// ParseCommit reads the commit timestamp. A payload shorter than 8
+// bytes is rejected: a commit with no timestamp cannot be a stop point.
+func ParseCommit(payload []byte) (int64, error) {
+	if len(payload) < 8 {
+		return 0, fmt.Errorf("wal: %d bytes too short for commit payload", len(payload))
+	}
+	return int64(binary.LittleEndian.Uint64(payload[0:])), nil
 }
