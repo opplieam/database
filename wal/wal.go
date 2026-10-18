@@ -4,8 +4,9 @@
 //
 // Record bytes: LSN addressing, three record types (insert, commit,
 // checkpoint), CRC32 framing. Commits carry a timestamp so a restore
-// can stop on one. Pure encode/decode, no file I/O; the segment file
-// lives in segment.go.
+// can stop on one. Pure encode/decode, no file I/O; the segment and
+// its archive live in segment.go and archive.go, and the backup label in
+// backup.go.
 //
 // How it works:
 //  1. Callers build a Record with a typed payload
@@ -22,9 +23,9 @@
 //
 // ## What we skip (not implemented)
 //
-// Full-page writes, archiving, timelines, background writer, compression.
-// We skip them because recovery logic (write path, ordering, replay rule)
-// is fully teachable without them; each is a follow-up topic.
+// Full-page writes, timelines, background writer, compression, segment
+// recycling. We skip them because recovery logic (write path, ordering,
+// replay rule) is fully teachable without them; each is a follow-up topic.
 package wal
 
 import (
