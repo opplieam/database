@@ -247,10 +247,10 @@ pool.FlushAll()            // manual checkpoint
 gives up halfway (TestPoolHeapScanMVCCAbandoned). Dirty pages stay in
 memory until flush (TestPoolInsertMVCCFlushDurability).
 
-**Limits:** attached pools flush WAL before pages; detached pools keep the
-old behavior and lose dirty pages on crash
-(TestPoolInsertMVCCUnflushedLoss). Single-threaded, so no locks. No async
-I/O.
+**Limits:** an attached pool (one given a WAL segment through `SetWAL`)
+flushes the log before pages, so a crash replays. A detached pool has no
+log, so anything it never flushed is lost (TestPoolInsertMVCCUnflushedLoss).
+Single-threaded, so no locks. No async I/O.
 
 ### WAL and crash recovery
 
@@ -270,7 +270,8 @@ pool.SetWAL(seg)
 wal.Checkpoint(pool, seg, "movies.ctl", mgr.NextID())
 // ... crash: drop the pool, reopen the log ...
 pool2 := buffer.NewBufferPool(4)
-pool2.Recover("movies.data", seg2, "movies.ctl")
+nextXid, _ := pool2.Recover("movies.data", seg2, "movies.ctl", clog)
+mgr.SetNextID(nextXid)
 ```
 
 **Read:** [Ch 9](https://www.interdb.jp/pg/pgsql09.html)
@@ -285,9 +286,57 @@ TestRecoverReplaysUnflushedRow). Checkpoints bound replay to the tail
 
 **Limits:** one data file per recovery (payloads carry no file id). No
 abort records: aborted inserts would leave invisible orphans VACUUM must
-not freeze yet. No full-page writes, no archiving, no timelines, no
-background writer. Crash tests drop the pool in-process; the sync calls
-are real but no plug is pulled.
+not freeze yet. No full-page writes, no timelines, no background
+writer. Archiving and point-in-time restore have their own section
+below. Crash tests drop the pool in-process; the sync calls are real
+but no plug is pulled.
+
+### Online backup and PITR
+
+Crash recovery rebuilds the last state the WAL could reach. Online backup
+answers a different question: this cluster, as of Tuesday 11:40. A base
+backup is a directory copied in an order that makes the copy mean
+something. Checkpoint first: dirty pages flush and the replay start (REDO)
+freezes before anything copies, so every copied page sits at or behind
+it. Files copy next, and the backup_label goes in last — the completion
+marker that records REDO, the next transaction id, and which archive the
+log went to. Restore runs the same story backwards: the label opens the
+directory, the files load back, and the log comes home from the archive.
+Replay runs from REDO and stops at the first commit whose timestamp
+passes the target — point-in-time rides commit timestamps the commit
+path already writes. The stop is then made durable by truncating the
+working log at the stop point, so the next recovery — which remembers
+no target — cannot undo the undo. The archive is never cut, so the same
+backup can install a different target later.
+
+```go
+c := backup.Cluster{
+    Data: "m.data", Clog: "m.clog", Ctl: "m.ctl",
+    WAL: "m.wal", Archives: "archive",
+}
+backup.Backup(c, "backup", pool, seg, mgr.NextID()) // checkpoint, archive, copy, label
+// ... the world moves on, then a mistake after the target ...
+backup.Restore(c, "backup", target, mgr)            // files back, replay to target, cut the log, flush
+```
+
+**Read:** [Ch 10](https://www.interdb.jp/pg/pgsql10.html)
+
+**Run:** `go test ./learn/ -run TestBackupSuite -v` ([test](learn/backup_integration_test.go))
+
+**Tested:** the whole chain end to end — Alice and Bob survive the
+backup, Carol rides the newest archive into the restore, Dave is
+invisible after the target and stays invisible after an untargeted
+recovery (TestPITRToTarget). Refusals: a finished backup directory
+rejects a second run and a failed one retries
+(TestBackupRefusesFinishedOutDir, TestBackupAllowsPartialOutDir);
+restore rejects a label-less directory and a lost archive
+(TestRestoreRefusesWithoutLabel, TestRestoreRefusesLostArchive). A
+backup's pages are the state frozen at the checkpoint
+(TestBackupSnapshotIsFrozen).
+
+**Limits:** archiving is one full log copy per backup; segment rollover
+(see TODO) will cap that. Restore always takes the newest archive. No
+timeline forks. Single-threaded, like everything else.
 
 ## Project Structure
 
@@ -300,6 +349,7 @@ database/
 ├── vacuum/               # VACUUM, cost tracker, cost reporter
 ├── buffer/               # Buffer pool (clock sweep, dirty tracking, recovery)
 ├── wal/                  # Write-ahead log (records, segment, checkpoint)
+├── backup/               # Base backup and PITR restore
 ├── learn/                # Runnable study notes: run with go test ./learn/ -v
 ├── movies.csv            # Sample data
 └── go.mod
@@ -322,7 +372,8 @@ database/
 
 ### Buffer manager ([Ch 8](https://www.interdb.jp/pg/pgsql08.html))
 - [x] Buffer pool (page cache, clock-sweep eviction, dirty tracking, manual flush)
-- [x] Pooled MVCC scan and insert (separate structs, legacy paths untouched)
+- [x] Pooled MVCC scan and insert (separate structs, older paths untouched)
+- [ ] Pooled insert updates the FSM (page selection scans cached pages instead of reading the map, and pooled writes never write it, so the sidecar goes stale for pooled files)
 
 ### Storage and indexing ([Ch 1](https://www.interdb.jp/pg/pgsql01.html), [Ch 7](https://www.interdb.jp/pg/pgsql07.html))
 - [ ] HOT, heap-only tuples (needs UPDATE/DELETE executors, same-page version chaining, skip-index rule)
@@ -332,3 +383,14 @@ database/
 - [x] Write-Ahead Logging (LSN-stamped pages, commit ordering, checkpoints, replay)
 - [ ] Full-page writes (first-change-per-checkpoint page images, torn-write recovery)
 - [ ] Multi-file recovery (needs file id in insert payloads)
+- [ ] Segment rollover and recycling (one full-copy archive per backup today; rollover replaces it)
+
+### Online backup and PITR ([Ch 10](https://www.interdb.jp/pg/pgsql10.html))
+- [x] Base backup and PITR restore (commit timestamps on WAL, clog rebuild on
+  replay, recovery target, WAL archive, backup_label, base backup, restore
+  truncated at the stop LSN)
+- [ ] WAL summarizer (summary files named by LSN range, written after each
+  checkpoint; built once and reverted — its only consumer went with it,
+  so revisit both together)
+- [ ] Incremental backup and combine (copy only changed pages, layer them
+  back; retired the same day as the summarizer)
