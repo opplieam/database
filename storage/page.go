@@ -259,7 +259,7 @@ func (p *Page) IsSlotDead(index int) bool {
 //
 // How it works:
 //   - Decode TxRecord from slot
-//   - Set TxMin to FrozenTxID (2)
+//   - Set TxMin to FrozenTxID (0)
 //   - Encode back and update slot
 //
 // TxMin is always 8 bytes, so record length won't change.

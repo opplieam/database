@@ -159,6 +159,24 @@ func TestVisibleReadCommittedSeesHigherIDCommit(t *testing.T) {
 		"a commit from an id above the reader's statement count must be visible")
 }
 
+func TestVisibleFrozenRow(t *testing.T) {
+	clog := setupClog(t)
+
+	// No clog entry for id 0; frozen rows must not need one.
+	rec := TxRecord{TxMin: tx.FrozenTxID, TxMax: 0, CID: 0, Data: Tuple{"A"}}
+	assert.True(t, rec.Visible(tx.Snapshot{TxID: 5, Cutoff: 5}, clog),
+		"a frozen row must be visible without a clog entry")
+}
+
+func TestVisibleFrozenRowDeleted(t *testing.T) {
+	clog := setupClog(t)
+
+	rec := TxRecord{TxMin: tx.FrozenTxID, TxMax: 2, CID: 0, Data: Tuple{"A"}}
+	clog.LogCommit(2)
+	assert.False(t, rec.Visible(tx.Snapshot{TxID: 3, Cutoff: 3}, clog),
+		"a frozen row deleted before the snapshot is invisible")
+}
+
 func TestInsertTxRecord(t *testing.T) {
 	rec := InsertTxRecord(5, 3, Tuple{uint32(1), "Toy Story", "Adventure"})
 

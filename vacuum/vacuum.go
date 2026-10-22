@@ -55,8 +55,6 @@ import (
 	"database/btree"
 )
 
-const FrozenTxID = uint64(2)
-
 // ScanResult holds the results of scanning a heap file.
 type ScanResult struct {
 	DeadTIDs     []storage.TID
@@ -81,7 +79,8 @@ type VacuumStats struct {
 // ScanHeap scans a heap file to find dead tuples and tuples to freeze.
 //
 // Dead tuple: TxMax != 0 && committed && not in xipList
-// Freeze tuple: TxMin is "old" (only for LIVE tuples)
+// Freeze tuple: TxMin is "old", its creator committed, and it is not in
+// flight (only for LIVE tuples)
 //
 // How freeze works:
 //   - freezeMaxAge: how many transactions before a tuple is considered "old"
@@ -129,9 +128,12 @@ func ScanHeap(filename string, clog *tx.CommitLog, xipList map[uint64]bool, curr
 					PageId: pageId,
 					SlotId: uint16(slotId),
 				})
-			} else if shouldFreeze(txRecord.TxMin, currentTxID, freezeMaxAge) {
-				// Only freeze LIVE tuples (not dead ones)
-				// Dead tuples will be removed by VACUUM anyway
+			} else if shouldFreeze(txRecord.TxMin, currentTxID, freezeMaxAge) &&
+				clog.IsCommitted(txRecord.TxMin) &&
+				!xipList[txRecord.TxMin] {
+				// Only freeze LIVE tuples (not dead ones) whose creator
+				// committed and left the in-flight set. Freezing an active
+				// transaction's row would publish it early.
 				result.FrozenTuples = append(result.FrozenTuples, FrozenTuple{
 					TID:    storage.TID{PageId: pageId, SlotId: uint16(slotId)},
 					OldMin: txRecord.TxMin,
@@ -177,7 +179,8 @@ func isDead(txRecord storage.TxRecord, clog *tx.CommitLog, xipList map[uint64]bo
 // How wraparound works:
 //   - TxIDs are unsigned integers that circle back to 0
 //   - Without freeze, old tuples become invisible after wraparound
-//   - Freeze sets TxMin to FrozenTxID (2), making them always visible
+//   - Freeze sets TxMin to tx.FrozenTxID (0), making them always visible
+//   - 0 is reserved for that marker, so no real transaction uses it
 //
 // The logic:
 //   cutoff = currentTxID - freezeMaxAge
@@ -186,9 +189,13 @@ func isDead(txRecord storage.TxRecord, clog *tx.CommitLog, xipList map[uint64]bo
 //
 // Example with small numbers (max=10, freezeMaxAge=3, currentTxID=2):
 //   cutoff = 2 - 3 = -1 → wraps to 18446744073709551615
-//   New zone (keep): {0, 1, 2} (recent transactions)
+//   New zone (keep): {1, 2} (recent transactions; 0 is the frozen marker)
 //   Old zone (freeze): {3, 4, 5, 6, 7, 8, 9} (older than 3 transactions)
 func shouldFreeze(txMin uint64, currentTxID uint64, freezeMaxAge uint64) bool {
+	if txMin == tx.FrozenTxID {
+		return false // already frozen; never assign it twice
+	}
+
 	cutoff := currentTxID - freezeMaxAge
 
 	// Check if wraparound happened
@@ -228,7 +235,7 @@ func ApplyFreezes(filename string, frozenTuples []FrozenTuple) error {
 		}
 
 		for _, slotId := range slotIds {
-			if err := page.FreezeTuple(int(slotId), FrozenTxID); err != nil {
+			if err := page.FreezeTuple(int(slotId), tx.FrozenTxID); err != nil {
 				// If freeze fails, skip this tuple
 				continue
 			}

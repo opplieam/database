@@ -5,6 +5,11 @@ package tx
 
 import "maps"
 
+// FrozenTxID marks a row created before every transaction. Vacuum rewrites
+// old live rows to this id so they stay visible after their creator's commit
+// status ages out of the log. It is reserved: Begin never hands it out.
+const FrozenTxID uint64 = 0
+
 // Status is where a transaction stands in its lifecycle. Status changes once:
 // a transaction starts active and ends committed or aborted.
 type Status int

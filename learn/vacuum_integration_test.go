@@ -44,7 +44,7 @@ func (s *VacuumSuite) TestFullVacuumFlow() {
 	// Step 1: Create heap file with 5 tuples
 	s.T().Logf("Step 1: Create heap file with 5 tuples")
 	s.T().Logf("  - Tuple 0: TxMin=1, TxMax=0 (alive, old - needs freeze)")
-	s.T().Logf("  - Tuple 1: TxMin=2, TxMax=0 (alive, recent)")
+	s.T().Logf("  - Tuple 1: TxMin=2, TxMax=0 (alive, old - needs freeze)")
 	s.T().Logf("  - Tuple 2: TxMin=3, TxMax=4 (dead - deleted by tx 4)")
 	s.T().Logf("  - Tuple 3: TxMin=5, TxMax=6 (dead - deleted by tx 6)")
 	s.T().Logf("  - Tuple 4: TxMin=7, TxMax=0 (alive, recent)")
@@ -70,8 +70,13 @@ func (s *VacuumSuite) TestFullVacuumFlow() {
 
 	// Step 2: Create commit log
 	s.T().Logf("Step 2: Create commit log")
+	s.T().Logf("  - tx 1, 2, 3, 5, 7 committed (the inserts)")
 	s.T().Logf("  - tx 4 committed (deletion of tuple 2)")
 	s.T().Logf("  - tx 6 committed (deletion of tuple 3)")
+	for _, txID := range []uint64{1, 2, 3, 5, 7} {
+		err = s.clog.LogCommit(txID)
+		s.Require().NoError(err)
+	}
 	err = s.clog.LogCommit(4)
 	s.Require().NoError(err)
 	err = s.clog.LogCommit(6)
@@ -110,7 +115,7 @@ func (s *VacuumSuite) TestFullVacuumFlow() {
 	// Step 6: Verify results
 	s.T().Logf("Step 6: Verify results")
 	s.T().Logf("  - Dead tuples found: %d (expected 2)", stats.DeadTuples)
-	s.T().Logf("  - Tuples frozen: %d (expected 2 - TxMin=1 and TxMin=3)", stats.FrozenTuples)
+	s.T().Logf("  - Tuples frozen: %d (expected 2 - TxMin=1 and TxMin=2)", stats.FrozenTuples)
 	s.T().Logf("  - Index entries removed: %d (expected 2)", stats.IndexEntries)
 	s.Equal(2, stats.DeadTuples)
 	s.Equal(2, stats.FrozenTuples)

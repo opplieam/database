@@ -263,9 +263,10 @@ func DecodeTxRecord(buf []byte) (TxRecord, error) {
 //
 // A record is VISIBLE if:
 //  1. It's my own uncommitted change
-//  2. The creator is NOT in Snapshot.Xip (was not in-progress at snapshot)
-//  3. The creator committed before my snapshot
-//  4. It's not deleted, OR the delete hasn't happened yet
+//  2. It's frozen (created before every transaction)
+//  3. The creator is NOT in Snapshot.Xip (was not in-progress at snapshot)
+//  4. The creator committed before my snapshot
+//  5. It's not deleted, OR the delete hasn't happened yet
 //
 // A record is INVISIBLE if:
 //   - The creator is in Snapshot.Xip (was in-progress at snapshot)
@@ -274,6 +275,9 @@ func DecodeTxRecord(buf []byte) (TxRecord, error) {
 //   - It was deleted before my snapshot
 //
 // Examples:
+//
+//	TxRecord{TxMin: 0, TxMax: 0}, clog has no entry for 0
+//	  Visible(tx.Snapshot{TxID: 5, Cutoff: 5}, clog) → true   (frozen)
 //
 //	TxRecord{TxMin: 1, TxMax: 0}, clog has tx=1 committed
 //	  Visible(tx.Snapshot{TxID: 1, Cutoff: 1}, clog) → true   (my own change)
@@ -288,19 +292,22 @@ func (r TxRecord) Visible(snap tx.Snapshot, clog *tx.CommitLog) bool {
 		return true
 	}
 
-	// If creator is in my xip_list → was in-progress at my snapshot → invisible
-	if snap.Xip[r.TxMin] {
-		return false
-	}
+	// Frozen rows predate every transaction, so no clog lookup is needed.
+	if r.TxMin != tx.FrozenTxID {
+		// If creator is in my xip_list → was in-progress at my snapshot → invisible
+		if snap.Xip[r.TxMin] {
+			return false
+		}
 
-	// Is the creator committed?
-	if !clog.IsCommitted(r.TxMin) {
-		return false
-	}
+		// Is the creator committed?
+		if !clog.IsCommitted(r.TxMin) {
+			return false
+		}
 
-	// Was the record created at or after my snapshot?
-	if r.TxMin >= snap.Cutoff {
-		return false
+		// Was the record created at or after my snapshot?
+		if r.TxMin >= snap.Cutoff {
+			return false
+		}
 	}
 
 	// Is the record alive (not deleted)?

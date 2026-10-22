@@ -219,6 +219,13 @@ func TestShouldFreeze(t *testing.T) {
 			expected:     true,
 		},
 		{
+			name:         "AlreadyFrozen",
+			txMin:        0,
+			currentTxID:  100,
+			freezeMaxAge: 50,
+			expected:     false,
+		},
+		{
 			name:         "LargeNumbers_OldTuple",
 			txMin:        40000000,
 			currentTxID:  150000000,
@@ -319,6 +326,30 @@ func TestScanHeap(t *testing.T) {
 			freezeMaxAge: 50,
 			expectedDead: 0,
 			expectedFrozen: 1,
+		},
+		{
+			name: "UncommittedCreatorNotFrozen",
+			records: []storage.TxRecord{
+				{TxMin: 1, TxMax: 0, CID: 0},
+			},
+			committed:      []uint64{},
+			xipList:        map[uint64]bool{},
+			currentTxID:    100,
+			freezeMaxAge:   50,
+			expectedDead:   0,
+			expectedFrozen: 0,
+		},
+		{
+			name: "CreatorInXipNotFrozen",
+			records: []storage.TxRecord{
+				{TxMin: 1, TxMax: 0, CID: 0},
+			},
+			committed:      []uint64{1},
+			xipList:        map[uint64]bool{1: true},
+			currentTxID:    100,
+			freezeMaxAge:   50,
+			expectedDead:   0,
+			expectedFrozen: 0,
 		},
 		{
 			name: "ComplexScenario",
@@ -478,13 +509,13 @@ func TestApplyFreezes(t *testing.T) {
 	page0, _ := file.ReadPage(0)
 	rec0, _ := page0.GetRecord(0)
 	txRec0, _ := storage.DecodeTxRecord(rec0)
-	assert.Equal(t, FrozenTxID, txRec0.TxMin, "TxMin should be frozen")
+	assert.Equal(t, tx.FrozenTxID, txRec0.TxMin, "TxMin should be frozen")
 
 	// Check page 1, slot 0
 	page1, _ := file.ReadPage(1)
 	rec1, _ := page1.GetRecord(0)
 	txRec1, _ := storage.DecodeTxRecord(rec1)
-	assert.Equal(t, FrozenTxID, txRec1.TxMin, "TxMin should be frozen")
+	assert.Equal(t, tx.FrozenTxID, txRec1.TxMin, "TxMin should be frozen")
 }
 
 func TestApplyFreezes_SkipDeadSlots(t *testing.T) {
@@ -520,7 +551,7 @@ func TestApplyFreezes_SkipDeadSlots(t *testing.T) {
 	page1, _ := file.ReadPage(1)
 	rec1, _ := page1.GetRecord(0)
 	txRec1, _ := storage.DecodeTxRecord(rec1)
-	assert.Equal(t, FrozenTxID, txRec1.TxMin, "TxMin should be frozen")
+	assert.Equal(t, tx.FrozenTxID, txRec1.TxMin, "TxMin should be frozen")
 }
 
 // =============================================================================
@@ -570,7 +601,7 @@ func TestFullVacuumFlow(t *testing.T) {
 	assert.False(t, page0.IsSlotDead(0), "page 0, slot 0 alive")
 	rec0, _ := page0.GetRecord(0)
 	txRec0, _ := storage.DecodeTxRecord(rec0)
-	assert.Equal(t, FrozenTxID, txRec0.TxMin, "TxMin frozen")
+	assert.Equal(t, tx.FrozenTxID, txRec0.TxMin, "TxMin frozen")
 
 	// Page 1: dead
 	page1, _ := file.ReadPage(1)
@@ -581,7 +612,7 @@ func TestFullVacuumFlow(t *testing.T) {
 	assert.False(t, page2.IsSlotDead(0), "page 2, slot 0 alive")
 	rec2, _ := page2.GetRecord(0)
 	txRec2, _ := storage.DecodeTxRecord(rec2)
-	assert.Equal(t, FrozenTxID, txRec2.TxMin, "TxMin frozen")
+	assert.Equal(t, tx.FrozenTxID, txRec2.TxMin, "TxMin frozen")
 
 	// Page 3: dead
 	page3, _ := file.ReadPage(3)
@@ -592,7 +623,7 @@ func TestFullVacuumFlow(t *testing.T) {
 	assert.False(t, page4.IsSlotDead(0), "page 4, slot 0 alive")
 	rec4, _ := page4.GetRecord(0)
 	txRec4, _ := storage.DecodeTxRecord(rec4)
-	assert.NotEqual(t, FrozenTxID, txRec4.TxMin, "TxMin NOT frozen")
+	assert.NotEqual(t, tx.FrozenTxID, txRec4.TxMin, "TxMin NOT frozen")
 }
 
 // =============================================================================
