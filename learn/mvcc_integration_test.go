@@ -50,12 +50,12 @@ func (s *MvccSuite) TestTxLifecycle() {
 	s.T().Logf("Step 4: Commit tx1")
 	mgr.Commit(tx1)
 	s.False(mgr.IsActive(tx1.ID()))
-	s.Equal(tx.TxStatusCommitted, tx1.Status())
+	s.Equal(tx.StatusCommitted, tx1.Status())
 
 	s.T().Logf("Step 5: Rollback tx2")
 	mgr.Rollback(tx2)
 	s.False(mgr.IsActive(tx2.ID()))
-	s.Equal(tx.TxStatusAborted, tx2.Status())
+	s.Equal(tx.StatusAborted, tx2.Status())
 }
 
 func (s *MvccSuite) TestSnapshotIsolationRepeatableRead() {

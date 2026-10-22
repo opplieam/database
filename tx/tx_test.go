@@ -11,14 +11,14 @@ func TestTransaction(t *testing.T) {
 	tx := NewTransaction(1, RepeatableRead)
 
 	assert.Equal(t, uint64(1), tx.ID())
-	assert.Equal(t, TxStatusActive, tx.Status())
+	assert.Equal(t, StatusActive, tx.Status())
 
 	tx.Commit()
-	assert.Equal(t, TxStatusCommitted, tx.Status())
+	assert.Equal(t, StatusCommitted, tx.Status())
 
 	tx2 := NewTransaction(2, ReadCommitted)
 	tx2.Rollback()
-	assert.Equal(t, TxStatusAborted, tx2.Status())
+	assert.Equal(t, StatusAborted, tx2.Status())
 }
 
 func TestNextCID(t *testing.T) {
@@ -30,18 +30,18 @@ func TestNextCID(t *testing.T) {
 	assert.Equal(t, uint32(2), tx.NextCID())
 }
 
-func TestSnapshotId(t *testing.T) {
+func TestSnapshotID(t *testing.T) {
 	mgr := NewManager()
 
 	// RepeatableRead: always returns tx.ID()
 	tx1 := NewTransaction(5, RepeatableRead)
-	assert.Equal(t, uint64(5), tx1.SnapshotId(mgr))
-	assert.Equal(t, uint64(5), tx1.SnapshotId(mgr)) // same every time
+	assert.Equal(t, uint64(5), tx1.SnapshotID(mgr))
+	assert.Equal(t, uint64(5), tx1.SnapshotID(mgr)) // same every time
 
 	// ReadCommitted: returns new statement ID each time
 	tx2 := NewTransaction(6, ReadCommitted)
-	snap1 := tx2.SnapshotId(mgr)
-	snap2 := tx2.SnapshotId(mgr)
+	snap1 := tx2.SnapshotID(mgr)
+	snap2 := tx2.SnapshotID(mgr)
 	assert.NotEqual(t, snap1, snap2, "ReadCommitted should return different snapshot IDs")
 	assert.True(t, snap2 > snap1, "snapshot IDs should be increasing")
 }

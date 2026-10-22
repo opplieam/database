@@ -1,21 +1,21 @@
 package tx
 
-// TxStatus represents the status of a transaction.
-type TxStatus int
+// Status represents the status of a transaction.
+type Status int
 
 const (
-	TxStatusActive    TxStatus = iota // in progress
-	TxStatusCommitted                 // successfully finished
-	TxStatusAborted                   // rolled back
+	StatusActive    Status = iota // in progress
+	StatusCommitted               // successfully finished
+	StatusAborted                 // rolled back
 )
 
-// IsolationLevel determines how transactions see each other's changes.
-type IsolationLevel int
+// Isolation determines how transactions see each other's changes.
+type Isolation int
 
 const (
 	// RepeatableRead snapshot taken at transaction start.
 	// All statements in the transaction see the same data.
-	RepeatableRead IsolationLevel = iota
+	RepeatableRead Isolation = iota
 
 	// ReadCommitted snapshot taken at each statement.
 	// Each statement may see different data.
@@ -27,22 +27,22 @@ const (
 // Example lifecycle:
 //
 //	tx := NewTransaction(1, RepeatableRead)
-//	tx.Status() → TxStatusActive
+//	tx.Status() → StatusActive
 //	// ... do work ...
 //	tx.Commit()
-//	tx.Status() → TxStatusCommitted
+//	tx.Status() → StatusCommitted
 type Transaction struct {
 	id             uint64
-	status         TxStatus
+	status         Status
 	cid            uint32 // command id counter (0, 1, 2, ...)
 	stmtCounter    uint64 // statement counter for ReadCommitted
-	isolationLevel IsolationLevel
+	isolationLevel Isolation
 	xipList        map[uint64]bool // in-progress txs at snapshot time
 }
 
 // NewTransaction creates a new active transaction with the given id and isolation level.
-func NewTransaction(id uint64, isolationLevel IsolationLevel) *Transaction {
-	return &Transaction{id: id, status: TxStatusActive, isolationLevel: isolationLevel}
+func NewTransaction(id uint64, isolationLevel Isolation) *Transaction {
+	return &Transaction{id: id, status: StatusActive, isolationLevel: isolationLevel}
 }
 
 // ID returns the transaction id.
@@ -51,7 +51,7 @@ func (t *Transaction) ID() uint64 {
 }
 
 // Status returns the transaction status.
-func (t *Transaction) Status() TxStatus {
+func (t *Transaction) Status() Status {
 	return t.status
 }
 
@@ -78,16 +78,16 @@ func (t *Transaction) NextCID() uint32 {
 func (t *Transaction) NewStatement(mgr *Manager) uint64 {
 	t.stmtCounter++
 	if t.isolationLevel == ReadCommitted {
-		t.xipList = mgr.ActiveTxIds(t.id)
+		t.xipList = mgr.ActiveTxIDs(t.id)
 	}
 	return t.stmtCounter
 }
 
-// SnapshotId returns the appropriate snapshot ID based on isolation level.
+// SnapshotID returns the appropriate snapshot ID based on isolation level.
 //
 // RepeatableRead: returns tx.ID() (same snapshot for entire transaction)
 // ReadCommitted: returns tx.NewStatement() (new snapshot per statement)
-func (t *Transaction) SnapshotId(mgr *Manager) uint64 {
+func (t *Transaction) SnapshotID(mgr *Manager) uint64 {
 	if t.isolationLevel == ReadCommitted {
 		return t.NewStatement(mgr)
 	}
@@ -96,12 +96,12 @@ func (t *Transaction) SnapshotId(mgr *Manager) uint64 {
 
 // Commit marks the transaction as committed.
 func (t *Transaction) Commit() {
-	t.status = TxStatusCommitted
+	t.status = StatusCommitted
 }
 
 // Rollback marks the transaction as aborted.
 func (t *Transaction) Rollback() {
-	t.status = TxStatusAborted
+	t.status = StatusAborted
 }
 
 // XipList returns the transaction's xip_list.
@@ -133,7 +133,7 @@ func NewManager() *Manager {
 }
 
 // Begin starts a new transaction with the given isolation level.
-func (m *Manager) Begin(isolationLevel IsolationLevel) *Transaction {
+func (m *Manager) Begin(isolationLevel Isolation) *Transaction {
 	tx := NewTransaction(m.nextId, isolationLevel)
 
 	// Capture in-progress transactions at snapshot time
@@ -178,8 +178,8 @@ func (m *Manager) IsActive(txId uint64) bool {
 	return ok
 }
 
-// ActiveTxIds returns a copy of active transaction IDs, excluding the specified tx.
-func (m *Manager) ActiveTxIds(excludeTxId uint64) map[uint64]bool {
+// ActiveTxIDs returns a copy of active transaction IDs, excluding the specified tx.
+func (m *Manager) ActiveTxIDs(excludeTxId uint64) map[uint64]bool {
 	result := make(map[uint64]bool)
 	for id := range m.active {
 		if id != excludeTxId {
