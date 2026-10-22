@@ -1,28 +1,36 @@
+// Package tx manages transaction identity and lifecycle: it hands out ids,
+// tracks which transactions are in flight, chooses the snapshot a read uses
+// under each isolation level, and records how each transaction ended.
 package tx
 
-// Status represents the status of a transaction.
+// Status is where a transaction stands in its lifecycle. Status changes once:
+// a transaction starts active and ends committed or aborted.
 type Status int
 
 const (
-	StatusActive    Status = iota // in progress
-	StatusCommitted               // successfully finished
-	StatusAborted                 // rolled back
+	StatusActive    Status = iota // running; its writes are not visible yet
+	StatusCommitted               // finished; its writes are visible
+	StatusAborted                 // finished; its writes are discarded
 )
 
-// Isolation determines how transactions see each other's changes.
+// Isolation decides which snapshot a transaction reads through: one fixed
+// snapshot for the whole transaction, or a fresh one per statement.
 type Isolation int
 
 const (
-	// RepeatableRead snapshot taken at transaction start.
-	// All statements in the transaction see the same data.
+	// RepeatableRead takes one snapshot at Begin, so every statement sees
+	// the same rows and the same in-progress set.
 	RepeatableRead Isolation = iota
 
-	// ReadCommitted snapshot taken at each statement.
-	// Each statement may see different data.
+	// ReadCommitted takes a new snapshot for every statement, so a commit
+	// that happens in between becomes visible mid-transaction.
 	ReadCommitted
 )
 
-// Transaction represents a single transaction.
+// Transaction is one unit of work: the statements between Begin and
+// Commit/Rollback, which take effect together or not at all. Manager.Begin is
+// the only way to create one and Manager.Commit or Manager.Rollback the only
+// way to finish it; holding a *Transaction does not keep it active.
 //
 // Example lifecycle:
 //
@@ -41,7 +49,10 @@ type Transaction struct {
 	xipList        map[uint64]bool // in-progress txs at snapshot time
 }
 
-// newTransaction creates a new active transaction with the given id and isolation level.
+// newTransaction builds an active transaction with the given id and isolation
+// level. Only Manager.Begin should call it: Begin also registers the
+// transaction and advances the id counter, which is what keeps ids unique and
+// snapshots accurate.
 func newTransaction(id uint64, isolationLevel Isolation) *Transaction {
 	return &Transaction{id: id, status: StatusActive, isolationLevel: isolationLevel}
 }
@@ -56,7 +67,9 @@ func (t *Transaction) Status() Status {
 	return t.status
 }
 
-// NextCID returns the current command id and increments for the next command.
+// NextCID returns the next command id and advances the counter. Command ids
+// number one transaction's statements from zero, so a record can be traced
+// back to the statement that wrote it.
 //
 // Example:
 //
@@ -69,13 +82,12 @@ func (t *Transaction) NextCID() uint32 {
 	return cid
 }
 
-// newStatement returns a new snapshot ID for ReadCommitted isolation.
-// Each call returns a unique, increasing ID.
-// It also refreshes xip_list.
+// newStatement advances the statement counter and returns the new snapshot ID.
+// Under ReadCommitted it also refreshes xipList to the transactions currently
+// in flight, which is what makes each statement see a new snapshot.
 //
-// NOTE: This is only for ReadCommitted!
-// RepeatableRead does NOT call newStatement.
-// RepeatableRead uses the fixed xip_list from Begin().
+// Callers should reach this through SnapshotID: a RepeatableRead transaction
+// must keep the xipList it captured at Begin.
 func (t *Transaction) newStatement(mgr *Manager) uint64 {
 	t.stmtCounter++
 	if t.isolationLevel == ReadCommitted {
@@ -84,10 +96,11 @@ func (t *Transaction) newStatement(mgr *Manager) uint64 {
 	return t.stmtCounter
 }
 
-// SnapshotID returns the appropriate snapshot ID based on isolation level.
+// SnapshotID returns the snapshot a read should use.
 //
-// RepeatableRead: returns tx.ID() (same snapshot for entire transaction)
-// ReadCommitted: returns tx.newStatement(mgr) (new snapshot per statement)
+// RepeatableRead: returns tx.ID(), so every statement reads the same snapshot.
+// ReadCommitted: returns a new statement ID from newStatement, so each
+// statement reads a fresh one; that call also refreshes xipList.
 func (t *Transaction) SnapshotID(mgr *Manager) uint64 {
 	if t.isolationLevel == ReadCommitted {
 		return t.newStatement(mgr)
@@ -95,22 +108,30 @@ func (t *Transaction) SnapshotID(mgr *Manager) uint64 {
 	return t.id
 }
 
-// commit marks the transaction as committed.
+// commit marks the transaction committed. Manager.Commit calls it and also
+// removes the transaction from the active set; calling it alone would leave a
+// finished transaction looking active.
 func (t *Transaction) commit() {
 	t.status = StatusCommitted
 }
 
-// rollback marks the transaction as aborted.
+// rollback marks the transaction aborted. Manager.Rollback calls it and also
+// removes the transaction from the active set.
 func (t *Transaction) rollback() {
 	t.status = StatusAborted
 }
 
-// XipList returns the transaction's xip_list.
+// XipList returns the ids that were in flight when this transaction took its
+// snapshot. The map is the transaction's own, not a copy, so callers must not
+// modify it.
 func (t *Transaction) XipList() map[uint64]bool {
 	return t.xipList
 }
 
-// Manager manages transaction creation and tracks active transactions.
+// Manager hands out transaction ids and keeps the set of transactions that are
+// still in flight. Begin is the only way to start a transaction; Commit and
+// Rollback are the only ways to finish one, and both keep the active set in
+// step with the transaction status.
 //
 // Example:
 //
@@ -125,7 +146,7 @@ type Manager struct {
 	active map[uint64]*Transaction
 }
 
-// NewManager creates a new Manager.
+// NewManager returns a manager whose first transaction id is 1.
 func NewManager() *Manager {
 	return &Manager{
 		nextID: 1,
@@ -133,7 +154,9 @@ func NewManager() *Manager {
 	}
 }
 
-// Begin starts a new transaction with the given isolation level.
+// Begin allocates the next id, records the transactions currently in flight as
+// this transaction's snapshot, and adds the new transaction to the active set.
+// Finish it with Commit or Rollback.
 func (m *Manager) Begin(isolationLevel Isolation) *Transaction {
 	tx := newTransaction(m.nextID, isolationLevel)
 
@@ -148,7 +171,9 @@ func (m *Manager) Begin(isolationLevel Isolation) *Transaction {
 	return tx
 }
 
-// Commit commits a transaction and removes it from active tracking.
+// Commit marks the transaction committed and removes it from the active set.
+// It does not write the commit log: the executor calls Clog.LogCommit once the
+// WAL record is durable.
 func (m *Manager) Commit(tx *Transaction) {
 	tx.commit()
 	delete(m.active, tx.ID())
@@ -167,19 +192,22 @@ func (m *Manager) SetNextID(next uint64) {
 	}
 }
 
-// Rollback aborts a transaction and removes it from active tracking.
+// Rollback marks the transaction aborted and removes it from the active set.
+// Nothing reaches the commit log, so its rows stay invisible to everyone.
 func (m *Manager) Rollback(tx *Transaction) {
 	tx.rollback()
 	delete(m.active, tx.ID())
 }
 
-// IsActive returns true if the transaction is still active (not committed/aborted).
+// IsActive reports whether the id is still in the active set, meaning its
+// transaction has not committed or aborted yet.
 func (m *Manager) IsActive(txID uint64) bool {
 	_, ok := m.active[txID]
 	return ok
 }
 
-// ActiveTxIDs returns a copy of active transaction IDs, excluding the specified tx.
+// ActiveTxIDs returns the ids currently in flight, excluding excludeTxID. The
+// result is a copy, so the caller may keep or modify it.
 func (m *Manager) ActiveTxIDs(excludeTxID uint64) map[uint64]bool {
 	result := make(map[uint64]bool)
 	for id := range m.active {
