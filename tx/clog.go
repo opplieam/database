@@ -12,13 +12,14 @@ import (
 // transaction id followed by a 1-byte status.
 const clogRecordSize = 8 + 1
 
-// ClogStatus represents the status of a transaction in the commit log.
-type ClogStatus byte
+// clogStatus is how a record marks a transaction in the commit log. The zero
+// value, clogStatusInProgress, also stands for a transaction with no record.
+type clogStatus byte
 
 const (
-	ClogStatusInProgress ClogStatus = 0x00
-	ClogStatusCommitted  ClogStatus = 0x01
-	ClogStatusAborted    ClogStatus = 0x02
+	clogStatusInProgress clogStatus = 0x00
+	clogStatusCommitted  clogStatus = 0x01
+	clogStatusAborted    clogStatus = 0x02
 )
 
 // CommitLog records how each transaction ended, in memory and on disk.
@@ -39,7 +40,7 @@ const (
 // fsynced immediately, which is the durability choice, not an accident.
 type CommitLog struct {
 	file    *os.File
-	records map[uint64]ClogStatus // status by transaction id; rebuilt by load
+	records map[uint64]clogStatus // status by transaction id; rebuilt by load
 }
 
 // OpenCommitLog opens or creates the commit log at path and replays it into
@@ -52,7 +53,7 @@ func OpenCommitLog(path string) (*CommitLog, error) {
 
 	cl := &CommitLog{
 		file:    f,
-		records: make(map[uint64]ClogStatus),
+		records: make(map[uint64]clogStatus),
 	}
 
 	if err := cl.load(); err != nil {
@@ -66,27 +67,27 @@ func OpenCommitLog(path string) (*CommitLog, error) {
 // LogCommit records that a transaction committed, in memory and on disk. It
 // syncs before returning, so a nil error means the mark is durable.
 func (cl *CommitLog) LogCommit(txID uint64) error {
-	cl.records[txID] = ClogStatusCommitted
-	return cl.append(txID, ClogStatusCommitted)
+	cl.records[txID] = clogStatusCommitted
+	return cl.append(txID, clogStatusCommitted)
 }
 
 // LogAbort records that a transaction aborted, in memory and on disk. It syncs
 // before returning, so a nil error means the mark is durable.
 func (cl *CommitLog) LogAbort(txID uint64) error {
-	cl.records[txID] = ClogStatusAborted
-	return cl.append(txID, ClogStatusAborted)
+	cl.records[txID] = clogStatusAborted
+	return cl.append(txID, clogStatusAborted)
 }
 
 // IsCommitted reports whether the transaction is known to have committed. An
 // unknown id is not committed.
 func (cl *CommitLog) IsCommitted(txID uint64) bool {
-	return cl.records[txID] == ClogStatusCommitted
+	return cl.records[txID] == clogStatusCommitted
 }
 
 // IsAborted reports whether the transaction is known to have aborted. An
 // unknown id is not aborted.
 func (cl *CommitLog) IsAborted(txID uint64) bool {
-	return cl.records[txID] == ClogStatusAborted
+	return cl.records[txID] == clogStatusAborted
 }
 
 // IsInProgress reports whether the transaction has no recorded outcome. An
@@ -97,7 +98,7 @@ func (cl *CommitLog) IsInProgress(txID uint64) bool {
 	if !ok {
 		return true // unknown = in progress
 	}
-	return status == ClogStatusInProgress
+	return status == clogStatusInProgress
 }
 
 // Close closes the log file. Reopen the same path to replay it.
@@ -108,7 +109,7 @@ func (cl *CommitLog) Close() error {
 // append writes one record at the end of the file and syncs it. Write-through
 // is deliberate: the mark must not be lost if the process dies right after
 // append returns.
-func (cl *CommitLog) append(txID uint64, status ClogStatus) error {
+func (cl *CommitLog) append(txID uint64, status clogStatus) error {
 	if _, err := cl.file.Seek(0, io.SeekEnd); err != nil {
 		return fmt.Errorf("tx: seek commit log end: %w", err)
 	}
@@ -152,7 +153,7 @@ func (cl *CommitLog) load() error {
 		}
 
 		txID := binary.LittleEndian.Uint64(recBuf[:8])
-		cl.records[txID] = ClogStatus(recBuf[8])
+		cl.records[txID] = clogStatus(recBuf[8])
 	}
 }
 
