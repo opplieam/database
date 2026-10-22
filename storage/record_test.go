@@ -126,6 +126,39 @@ func TestVisibleDeleted(t *testing.T) {
 	assert.True(t, deleted.Visible(tx.Snapshot{TxID: 1, Cutoff: 1}, clog), "tx=1 should see record (delete happened after)")
 }
 
+func TestVisibleReadCommittedOwnWrite(t *testing.T) {
+	clog := setupClog(t)
+	mgr := tx.NewManager()
+	reader := mgr.Begin(tx.ReadCommitted)
+
+	rec := TxRecord{TxMin: reader.ID(), TxMax: 0, CID: 0, Data: Tuple{"A"}}
+
+	// Second statement: the transaction must still see its own insert.
+	mgr.Snapshot(reader)
+	snap := mgr.Snapshot(reader)
+	assert.True(t, rec.Visible(snap, clog),
+		"a transaction must see its own uncommitted insert")
+}
+
+func TestVisibleReadCommittedSeesHigherIDCommit(t *testing.T) {
+	clog := setupClog(t)
+	mgr := tx.NewManager()
+	reader := mgr.Begin(tx.ReadCommitted) // id 1
+
+	for i := 0; i < 8; i++ {
+		mgr.Begin(tx.RepeatableRead) // ids 2..9, left in flight
+	}
+	writer := mgr.Begin(tx.RepeatableRead) // id 10
+	rec := TxRecord{TxMin: writer.ID(), TxMax: 0, CID: 0, Data: Tuple{"A"}}
+
+	mgr.Commit(writer)
+	clog.LogCommit(writer.ID())
+
+	snap := mgr.Snapshot(reader)
+	assert.True(t, rec.Visible(snap, clog),
+		"a commit from an id above the reader's statement count must be visible")
+}
+
 func TestInsertTxRecord(t *testing.T) {
 	rec := InsertTxRecord(5, 3, Tuple{uint32(1), "Toy Story", "Adventure"})
 

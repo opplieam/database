@@ -59,7 +59,6 @@ type Transaction struct {
 	id             uint64
 	status         Status
 	cid            uint32 // command id counter (0, 1, 2, ...)
-	stmtCounter    uint64 // ReadCommitted counter, advanced by Manager.Snapshot
 	isolationLevel Isolation
 	xipList        map[uint64]bool // in-progress txs at snapshot time
 }
@@ -158,16 +157,15 @@ func (m *Manager) Begin(isolationLevel Isolation) *Transaction {
 // RepeatableRead: the view captured at Begin, cut off at the transaction's own
 // id. A transaction with a larger id started later, so its rows stay out.
 //
-// ReadCommitted: a fresh view on every call. The in-flight set is refreshed,
-// and the cutoff is the statement counter. The counter is not an id-space
-// bound; this keeps today's visibility exactly, and a later fix replaces it
-// with the manager's next id.
+// ReadCommitted: a fresh view on every call. The cutoff is nextID, the first
+// id not yet issued, and the in-flight set is refreshed. A commit between
+// statements therefore becomes visible: its id is below the cutoff and it has
+// left Xip.
 func (m *Manager) Snapshot(tx *Transaction) Snapshot {
 	if tx.isolationLevel == ReadCommitted {
-		tx.stmtCounter++
 		return Snapshot{
 			TxID:   tx.id,
-			Cutoff: tx.stmtCounter,
+			Cutoff: m.nextID,
 			Xip:    m.activeIDs(tx.id),
 		}
 	}

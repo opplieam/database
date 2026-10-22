@@ -33,17 +33,33 @@ func TestNextCID(t *testing.T) {
 func TestManagerSnapshot(t *testing.T) {
 	mgr := NewManager()
 
-	// RepeatableRead: the cutoff is always tx.ID()
-	tx1 := newTransaction(5, RepeatableRead)
-	assert.Equal(t, uint64(5), mgr.Snapshot(tx1).Cutoff)
-	assert.Equal(t, uint64(5), mgr.Snapshot(tx1).Cutoff) // same every time
+	// RepeatableRead: the cutoff is the transaction's own id.
+	tx1 := mgr.Begin(RepeatableRead) // id 1
+	assert.Equal(t, uint64(1), mgr.Snapshot(tx1).Cutoff)
+	assert.Equal(t, uint64(1), mgr.Snapshot(tx1).Cutoff) // same every time
 
-	// ReadCommitted: a new statement cutoff each time
-	tx2 := newTransaction(6, ReadCommitted)
-	snap1 := mgr.Snapshot(tx2).Cutoff
-	snap2 := mgr.Snapshot(tx2).Cutoff
-	assert.NotEqual(t, snap1, snap2, "ReadCommitted should return a new cutoff")
-	assert.True(t, snap2 > snap1, "cutoffs should be increasing")
+	// ReadCommitted: the cutoff is the next unassigned id. Running a
+	// statement does not move it; starting a transaction does.
+	reader := mgr.Begin(ReadCommitted) // id 2
+	assert.Equal(t, uint64(3), mgr.Snapshot(reader).Cutoff)
+	assert.Equal(t, uint64(3), mgr.Snapshot(reader).Cutoff)
+
+	mgr.Begin(RepeatableRead) // id 3
+	assert.Equal(t, uint64(4), mgr.Snapshot(reader).Cutoff)
+}
+
+func TestReadCommittedSnapshotCoversIssuedIDs(t *testing.T) {
+	mgr := NewManager()
+	reader := mgr.Begin(ReadCommitted) // id 1
+
+	var last *Transaction
+	for i := 0; i < 6; i++ {
+		last = mgr.Begin(RepeatableRead) // ids 2..7
+	}
+
+	snap := mgr.Snapshot(reader)
+	assert.Greater(t, snap.Cutoff, last.ID(),
+		"a statement snapshot must cover every id already issued")
 }
 
 func TestManager(t *testing.T) {

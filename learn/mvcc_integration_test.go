@@ -112,13 +112,13 @@ func (s *MvccSuite) TestSnapshotIsolationReadCommitted() {
 	s.mgr.Commit(tx1)
 	s.clog.LogCommit(tx1.ID())
 
-	s.T().Logf("Step 5: tx2 reads again (NEW snapshot)")
+	s.T().Logf("Step 5: tx2 reads again (new snapshot: cutoff unchanged, xip refreshed)")
 	snapshot2 := s.mgr.Snapshot(tx2)
 	s.T().Logf("  - tx2 xipList after Snapshot: %v (refreshed, tx1 is NO LONGER in xipList because it committed)", snapshot2.Xip)
-	s.T().Logf("  - Old version: TxMax=2, committed, 2 <= %d → delete BEFORE new snapshot → NOT visible", snapshot2.Cutoff)
+	s.T().Logf("  - Old version: TxMax=2, committed, 2 < %d → delete BEFORE new snapshot → NOT visible", snapshot2.Cutoff)
 	s.False(oldRec.Visible(snapshot2, s.clog), "tx2 does NOT see OLD version (delete before new snapshot)")
 
-	s.T().Logf("  - New version: TxMin=2, committed, 2 <= %d → VISIBLE", snapshot2.Cutoff)
+	s.T().Logf("  - New version: TxMin=2, committed, 2 < %d → VISIBLE", snapshot2.Cutoff)
 	s.True(newRec.Visible(snapshot2, s.clog), "tx2 sees NEW version (committed before new snapshot)")
 
 	s.T().Logf("Key insight: Read Committed - tx2 now sees 'Toy Story (Remastered)' (new version)")

@@ -284,7 +284,7 @@ func DecodeTxRecord(buf []byte) (TxRecord, error) {
 //	  Visible(tx.Snapshot{TxID: 2, Cutoff: 2, Xip: xip}, clog) → false  (tx=1 in-progress)
 func (r TxRecord) Visible(snap tx.Snapshot, clog *tx.CommitLog) bool {
 	// My own changes are always visible
-	if r.TxMin == snap.Cutoff {
+	if r.TxMin == snap.TxID {
 		return true
 	}
 
@@ -298,8 +298,8 @@ func (r TxRecord) Visible(snap tx.Snapshot, clog *tx.CommitLog) bool {
 		return false
 	}
 
-	// Was the record created before or at my snapshot?
-	if r.TxMin > snap.Cutoff {
+	// Was the record created at or after my snapshot?
+	if r.TxMin >= snap.Cutoff {
 		return false
 	}
 
@@ -313,8 +313,8 @@ func (r TxRecord) Visible(snap tx.Snapshot, clog *tx.CommitLog) bool {
 		return true
 	}
 
-	// Was the delete after my snapshot?
-	if r.TxMax > snap.Cutoff {
+	// Was the delete at or after my snapshot?
+	if r.TxMax >= snap.Cutoff {
 		return true
 	}
 
