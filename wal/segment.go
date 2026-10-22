@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 )
 
@@ -158,6 +159,83 @@ func (s *Segment) Truncate(l LSN) error {
 	}
 	s.lastLSN, s.end = last, end
 	return s.file.Sync()
+}
+
+// Send copies the segment's bytes from LSN from through the end into w,
+// and returns the end it sent through. Nothing exists below the header
+// or past the end, so both refuse.
+func (s *Segment) Send(w io.Writer, from LSN) (LSN, error) {
+	if from < SegmentHeaderSize || from > s.end {
+		return 0, fmt.Errorf("wal: cannot Send from LSN %d, end is %d", from, s.end)
+	}
+	if _, err := io.Copy(w, io.NewSectionReader(s.file, int64(from), int64(s.end-from))); err != nil {
+		return 0, err
+	}
+	return s.end, nil
+}
+
+// Receive appends complete WAL bytes at the end and returns the new tip.
+// The payload must decode as whole records and continue the receiver's
+// last record; a refused payload leaves the segment untouched.
+//
+// Validation runs over the bytes before any write. The chain check is
+// what turns "sent from the wrong offset" into a refusal: a record's
+// previous-record link must name the record this log ends with, or the
+// two logs do not share a past and joining them would splice unrelated
+// histories.
+func (s *Segment) Receive(b []byte) (LSN, error) {
+	if len(b) == 0 {
+		return s.end, nil
+	}
+
+	base := s.end
+	off := LSN(0)
+	prev := s.lastLSN
+	for off < LSN(len(b)) {
+		rec, next, err := decodeAt(b, off)
+		if err != nil {
+			return 0, fmt.Errorf("wal: receive: %w", err)
+		}
+		if rec.PrevLSN != prev {
+			return 0, fmt.Errorf("wal: receive chains onto LSN %d, log ends at %d",
+				rec.PrevLSN, prev)
+		}
+		prev = base + off
+		off = next
+	}
+
+	if _, err := s.file.WriteAt(b, int64(s.end)); err != nil {
+		return 0, err
+	}
+	// Recapture the tip from the file: the payload is trusted now, and
+	// the scan is the same walk Open uses to find the resume point.
+	last, end, err := s.scan()
+	if err != nil {
+		return 0, err
+	}
+	s.lastLSN, s.end = last, end
+	if err := s.file.Sync(); err != nil {
+		return 0, err
+	}
+	return s.end, nil
+}
+
+// decodeAt decodes the record at off inside buf, returning it and the
+// next offset. It mirrors readOne on bytes already in memory, so a
+// received payload can be validated before it touches the file.
+func decodeAt(buf []byte, off LSN) (*Record, LSN, error) {
+	if int(off)+RecordHeaderSize > len(buf) {
+		return nil, 0, fmt.Errorf("wal: short header at %d", off)
+	}
+	tot := binary.LittleEndian.Uint32(buf[off:])
+	if tot < RecordHeaderSize || int(off)+int(tot) > len(buf) {
+		return nil, 0, fmt.Errorf("wal: bad record length %d at %d", tot, off)
+	}
+	rec, err := DecodeRecord(buf[off : off+LSN(tot)])
+	if err != nil {
+		return nil, 0, fmt.Errorf("wal: offset %d: %w", off, err)
+	}
+	return rec, off + LSN(tot), nil
 }
 
 // scan walks records from after the magic, returning the last good

@@ -27,7 +27,7 @@ go test ./learn/ -run TestBufferSuite -v     # one topic at a time
 
 ## Topics
 
-- [Query operators](#query-operators) · [Storage](#storage) · [B+ tree index](#b-tree-index) · [MVCC and isolation](#mvcc-and-isolation) · [VACUUM](#vacuum) · [Buffer pool](#buffer-pool) · [WAL and crash recovery](#wal-and-crash-recovery)
+- [Query operators](#query-operators) · [Storage](#storage) · [B+ tree index](#b-tree-index) · [MVCC and isolation](#mvcc-and-isolation) · [VACUUM](#vacuum) · [Buffer pool](#buffer-pool) · [WAL and crash recovery](#wal-and-crash-recovery) · [Online backup and PITR](#online-backup-and-pitr) · [Streaming replication](#streaming-replication)
 
 Each topic is a simplified version of its interdb chapter for learning,
 not a port. The pattern is the same everywhere: single-threaded, no
@@ -338,6 +338,58 @@ backup's pages are the state frozen at the checkpoint
 (see TODO) will cap that. Restore always takes the newest archive. No
 timeline forks. Single-threaded, like everything else.
 
+### Streaming replication
+
+A standby is a second cluster that follows a first one: it starts from a
+base backup, then receives the log written since. Bootstrap is therefore
+the restore from the previous section with no stop point — files copied,
+REDO published from the label, replay to the log's end. Catch-up is the
+part that never ends: ask the primary for every byte after the standby's
+own log tip, write it, replay. Bytes travel, not records. An LSN is a
+byte offset, so re-encoding a record on the far side would shift every
+number after it; because both logs start as the same file, the same
+offsets name the same records on both ends.
+
+Receive checks before it writes: framing, checksums, and whether the
+first new record names the record this log already ends with. A payload
+from the wrong offset is refused rather than spliced in, which is what
+keeps two unrelated histories from joining. Replay re-runs from REDO
+every time and skips what pages already hold, the same page-LSN rule
+crash recovery uses, so nothing has to remember where replay stopped.
+
+```go
+st, _ := replication.Bootstrap(standbyCluster, "backup", mgr) // a restore that never stops
+status, _ := st.CatchUp(primarySeg)                           // ship tail, write, replay
+// status.Sent    primary tip when sent   status.Flushed  standby tip after receive
+// status.Applied where replay stopped    status.State    "catch-up" or "streaming"
+```
+
+**Read:** [Ch 11](https://www.interdb.jp/pg/pgsql11.html)
+
+**Run:** `go test ./replication/ -v` ([unit](replication/standby_test.go)),
+`go test ./learn/ -run TestReplicationSuite -v`
+([end to end](learn/replication_integration_test.go))
+
+**Tested:** bootstrap holds the backup's rows; a later commit stays
+invisible until catch-up, then appears; a second catch-up ships only the
+new tail; nothing new reports `streaming` and changes nothing
+(TestStandbyFollowsPrimary). Async's price: a commit made after the last
+catch-up is durable on the primary and absent on the standby, so losing
+the primary loses it — ship first and the same commit survives
+(TestLagIsDataLoss). Refusals: missing backup, send below the header or
+past the tip, undecodable and mis-chained payloads
+(TestBootstrapRefusesMissingBackup, TestSendRefusesBounds,
+TestReceiveRefusesGarbage, TestReceiveRefusesBrokenChain).
+
+**Limits:** no network. `Send` writes to an `io.Writer` and `Receive`
+takes bytes, so a socket fits without a redesign — but it would need a
+buffer for a record split across reads, and it teaches sockets, not
+replication. Async only: the primary never waits for an acknowledgement,
+so synchronous commit, its stalls, and hot-standby conflicts are out.
+Replay walks the whole log from REDO each catch-up; restartpoints would
+bound it. No slots, because nothing recycles the log here. No failover:
+timelines and rewind are TODO, election not planned.
+
 ## Project Structure
 
 ```
@@ -350,6 +402,7 @@ database/
 ├── buffer/               # Buffer pool (clock sweep, dirty tracking, recovery)
 ├── wal/                  # Write-ahead log (records, segment, checkpoint)
 ├── backup/               # Base backup and PITR restore
+├── replication/          # Standby bootstrap and catch-up
 ├── learn/                # Runnable study notes: run with go test ./learn/ -v
 ├── movies.csv            # Sample data
 └── go.mod
@@ -394,3 +447,13 @@ database/
   so revisit both together)
 - [ ] Incremental backup and combine (copy only changed pages, layer them
   back; retired the same day as the summarizer)
+
+### Streaming replication ([Ch 11](https://www.interdb.jp/pg/pgsql11.html))
+- [x] Async standby (bootstrap from a base backup, byte-range WAL shipping,
+  chain-checked receive, replay catch-up, sent/flushed/applied positions)
+- [ ] Restartpoints (replay from the last restartpoint instead of REDO each catch-up)
+- [ ] Network transport and partial-record buffering (`Send` already takes an `io.Writer`)
+- [ ] Synchronous commit (standby reports write/flush/apply positions; commits wait)
+- [ ] Replication slots (with segment rollover: recycle only up to the oldest standby's need)
+- [ ] Timelines and rewind/rejoin after failover (election, leases, quorum: not
+  planned — one process cannot test agreement under partition)
