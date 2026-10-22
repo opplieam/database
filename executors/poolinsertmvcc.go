@@ -84,7 +84,7 @@ func (in *PoolInsertMVCC) Next() (storage.Tuple, error) {
 
 	// Step 1: encode the MVCC record.
 	cid := in.ctx.Tx.NextCID()
-	txRec := storage.InsertTxRecord(in.ctx.Tx.Id(), cid, in.data())
+	txRec := storage.InsertTxRecord(in.ctx.Tx.ID(), cid, in.data())
 	encoded := storage.EncodeTxRecord(txRec)
 
 	// Step 2: ensure the file exists (empty); placement appends below.
@@ -106,7 +106,7 @@ func (in *PoolInsertMVCC) Next() (storage.Tuple, error) {
 	if err := in.appendCommit(); err != nil {
 		return nil, err
 	}
-	if err := in.ctx.Clog.LogCommit(in.ctx.Tx.Id()); err != nil {
+	if err := in.ctx.Clog.LogCommit(in.ctx.Tx.ID()); err != nil {
 		return nil, err
 	}
 
@@ -129,7 +129,7 @@ func (in *PoolInsertMVCC) appendWAL(pid uint32, page *storage.Page, encoded []by
 	}
 	slot := uint16(page.Header.RecordCount - 1)
 	rec := &wal.Record{
-		Xid:     in.ctx.Tx.Id(),
+		Xid:     in.ctx.Tx.ID(),
 		Type:    wal.RecordInsert,
 		Payload: wal.PayloadInsert(pid, slot, in.bitmap, encoded),
 	}
@@ -150,7 +150,7 @@ func (in *PoolInsertMVCC) appendCommit() error {
 	}
 	payload := wal.PayloadCommit(time.Now().UnixNano())
 	if _, err := seg.Append(&wal.Record{
-		Xid: in.ctx.Tx.Id(), Type: wal.RecordCommit, Payload: payload,
+		Xid: in.ctx.Tx.ID(), Type: wal.RecordCommit, Payload: payload,
 	}); err != nil {
 		return err
 	}

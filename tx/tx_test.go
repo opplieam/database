@@ -10,7 +10,7 @@ import (
 func TestTransaction(t *testing.T) {
 	tx := NewTransaction(1, RepeatableRead)
 
-	assert.Equal(t, uint64(1), tx.Id())
+	assert.Equal(t, uint64(1), tx.ID())
 	assert.Equal(t, TxStatusActive, tx.Status())
 
 	tx.Commit()
@@ -33,7 +33,7 @@ func TestNextCID(t *testing.T) {
 func TestSnapshotId(t *testing.T) {
 	mgr := NewTxManager()
 
-	// RepeatableRead: always returns tx.Id()
+	// RepeatableRead: always returns tx.ID()
 	tx1 := NewTransaction(5, RepeatableRead)
 	assert.Equal(t, uint64(5), tx1.SnapshotId(mgr))
 	assert.Equal(t, uint64(5), tx1.SnapshotId(mgr)) // same every time
@@ -53,8 +53,8 @@ func TestTxManager(t *testing.T) {
 	tx1 := mgr.Begin(RepeatableRead)
 	tx2 := mgr.Begin(ReadCommitted)
 
-	assert.Equal(t, uint64(1), tx1.Id())
-	assert.Equal(t, uint64(2), tx2.Id())
+	assert.Equal(t, uint64(1), tx1.ID())
+	assert.Equal(t, uint64(2), tx2.ID())
 	assert.True(t, mgr.IsActive(1))
 	assert.True(t, mgr.IsActive(2))
 
@@ -116,5 +116,5 @@ func TestSetNextIDOnlyMovesForward(t *testing.T) {
 	assert.Equal(t, uint64(50), mgr.NextID())
 
 	// And the next Begin hands out the restored value.
-	assert.Equal(t, uint64(50), mgr.Begin(RepeatableRead).Id())
+	assert.Equal(t, uint64(50), mgr.Begin(RepeatableRead).ID())
 }

@@ -25,7 +25,7 @@ func setupPooledMVCC(t *testing.T, filename string, titles []string) (*tx.Commit
 	wctx := &TransactionContext{
 		Tx:       wtx,
 		Clog:     clog,
-		Snapshot: wtx.Id(),
+		Snapshot: wtx.ID(),
 		XipList:  wtx.XipList(),
 	}
 	for i, title := range titles {
@@ -47,7 +47,7 @@ func readCtx(mgr *tx.TxManager, clog *tx.CommitLog) *TransactionContext {
 	return &TransactionContext{
 		Tx:       rtx,
 		Clog:     clog,
-		Snapshot: rtx.Id(),
+		Snapshot: rtx.ID(),
 		XipList:  rtx.XipList(),
 	}
 }

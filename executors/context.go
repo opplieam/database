@@ -12,7 +12,7 @@ import "database/tx"
 //	ctx := &TransactionContext{
 //	    Tx:       tx1,
 //	    Clog:     clog,
-//	    Snapshot: tx1.Id(),
+//	    Snapshot: tx1.ID(),
 //	    XipList:  tx1.XipList(),
 //	}
 //	scan := NewHeapFileScan("movies.data", ctx)

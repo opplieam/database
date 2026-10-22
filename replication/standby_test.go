@@ -71,7 +71,7 @@ func insertPooled(t *testing.T, path string, pool *buffer.BufferPool,
 	ctx := &executors.TransactionContext{
 		Tx:       wtx,
 		Clog:     clog,
-		Snapshot: wtx.Id(),
+		Snapshot: wtx.ID(),
 		XipList:  wtx.XipList(),
 	}
 	ins := executors.NewPoolInsertMVCC(path, m, 0, ctx, pool)
@@ -93,7 +93,7 @@ func scanRows(t *testing.T, c backup.Cluster, mgr *tx.TxManager) []storage.Tuple
 	ctx := &executors.TransactionContext{
 		Tx:       rtx,
 		Clog:     clog,
-		Snapshot: rtx.Id(),
+		Snapshot: rtx.ID(),
 		XipList:  rtx.XipList(),
 	}
 	scan, err := executors.NewPoolHeapScanMVCC(c.Data, ctx, buffer.NewBufferPool(4))

@@ -17,7 +17,7 @@ import (
 //
 // Example:
 //
-//	ctx := &TransactionContext{Tx: tx1, Clog: clog, Snapshot: tx1.Id()}
+//	ctx := &TransactionContext{Tx: tx1, Clog: clog, Snapshot: tx1.ID()}
 //	insert := NewInsert("movies.data", storage.MovieRecord{999, "New Movie", "Action"}, 0, ctx)
 //	tuple, err := insert.Next()
 //	// tuple = {999, "New Movie", "Action"}, record is now in file with MVCC metadata
@@ -55,7 +55,7 @@ func (i *Insert) Next() (storage.Tuple, error) {
 	if i.ctx != nil {
 		// MVCC mode: store TxRecord with metadata
 		cid := i.ctx.Tx.NextCID()
-		txRec := storage.InsertTxRecord(i.ctx.Tx.Id(), cid, i.data())
+		txRec := storage.InsertTxRecord(i.ctx.Tx.ID(), cid, i.data())
 		encoded = storage.EncodeTxRecord(txRec)
 	} else {
 		// Legacy mode: store raw MovieRecord
@@ -68,7 +68,7 @@ func (i *Insert) Next() (storage.Tuple, error) {
 
 	// auto-log commit if MVCC mode
 	if i.ctx != nil {
-		if err := i.ctx.Clog.LogCommit(i.ctx.Tx.Id()); err != nil {
+		if err := i.ctx.Clog.LogCommit(i.ctx.Tx.ID()); err != nil {
 			return nil, err
 		}
 	}

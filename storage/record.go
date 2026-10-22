@@ -253,7 +253,7 @@ func DecodeTxRecord(buf []byte) (TxRecord, error) {
 //
 // This function works with any isolation level.
 // The caller determines the snapshot ID:
-//   - REPEATABLE READ: pass tx.Id() (same snapshot for entire transaction)
+//   - REPEATABLE READ: pass tx.ID() (same snapshot for entire transaction)
 //   - READ COMMITTED: pass tx.NewStatement() (new snapshot per statement)
 //
 // The xip_list contains transaction IDs that were in-progress at snapshot time.

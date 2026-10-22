@@ -45,8 +45,8 @@ func NewTransaction(id uint64, isolationLevel IsolationLevel) *Transaction {
 	return &Transaction{id: id, status: TxStatusActive, isolationLevel: isolationLevel}
 }
 
-// Id returns the transaction id.
-func (t *Transaction) Id() uint64 {
+// ID returns the transaction id.
+func (t *Transaction) ID() uint64 {
 	return t.id
 }
 
@@ -85,7 +85,7 @@ func (t *Transaction) NewStatement(mgr *TxManager) uint64 {
 
 // SnapshotId returns the appropriate snapshot ID based on isolation level.
 //
-// RepeatableRead: returns tx.Id() (same snapshot for entire transaction)
+// RepeatableRead: returns tx.ID() (same snapshot for entire transaction)
 // ReadCommitted: returns tx.NewStatement() (new snapshot per statement)
 func (t *Transaction) SnapshotId(mgr *TxManager) uint64 {
 	if t.isolationLevel == ReadCommitted {
@@ -150,7 +150,7 @@ func (m *TxManager) Begin(isolationLevel IsolationLevel) *Transaction {
 // Commit commits a transaction and removes it from active tracking.
 func (m *TxManager) Commit(tx *Transaction) {
 	tx.Commit()
-	delete(m.active, tx.Id())
+	delete(m.active, tx.ID())
 }
 
 // NextID returns the next transaction id to hand out without allocating
@@ -169,7 +169,7 @@ func (m *TxManager) SetNextID(next uint64) {
 // Rollback aborts a transaction and removes it from active tracking.
 func (m *TxManager) Rollback(tx *Transaction) {
 	tx.Rollback()
-	delete(m.active, tx.Id())
+	delete(m.active, tx.ID())
 }
 
 // IsActive returns true if the transaction is still active (not committed/aborted).

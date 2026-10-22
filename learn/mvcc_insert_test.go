@@ -40,7 +40,7 @@ func (s *MvccInsertSuite) TestMVCCInsertAndScan() {
 	ctx := &executors.TransactionContext{
 		Tx:       tx1,
 		Clog:     s.clog,
-		Snapshot: tx1.Id(),
+		Snapshot: tx1.ID(),
 		XipList:  tx1.XipList(),
 	}
 
@@ -63,7 +63,7 @@ func (s *MvccInsertSuite) TestMVCCInsertAndScan() {
 	ctx2 := &executors.TransactionContext{
 		Tx:       tx2,
 		Clog:     s.clog,
-		Snapshot: tx2.Id(),
+		Snapshot: tx2.ID(),
 		XipList:  tx2.XipList(),
 	}
 
@@ -85,7 +85,7 @@ func (s *MvccInsertSuite) TestMVCCInsertUncommitted() {
 	ctx := &executors.TransactionContext{
 		Tx:       tx1,
 		Clog:     s.clog,
-		Snapshot: tx1.Id(),
+		Snapshot: tx1.ID(),
 		XipList:  tx1.XipList(),
 	}
 
@@ -105,7 +105,7 @@ func (s *MvccInsertSuite) TestMVCCInsertUncommitted() {
 	ctx2 := &executors.TransactionContext{
 		Tx:       tx2,
 		Clog:     s.clog,
-		Snapshot: tx2.Id(),
+		Snapshot: tx2.ID(),
 		XipList:  tx2.XipList(),
 	}
 
@@ -125,7 +125,7 @@ func (s *MvccInsertSuite) TestMVCCInsertMultipleAndScan() {
 	ctx := &executors.TransactionContext{
 		Tx:       tx1,
 		Clog:     s.clog,
-		Snapshot: tx1.Id(),
+		Snapshot: tx1.ID(),
 		XipList:  tx1.XipList(),
 	}
 
@@ -151,7 +151,7 @@ func (s *MvccInsertSuite) TestMVCCInsertMultipleAndScan() {
 	ctx2 := &executors.TransactionContext{
 		Tx:       tx2,
 		Clog:     s.clog,
-		Snapshot: tx2.Id(),
+		Snapshot: tx2.ID(),
 		XipList:  tx2.XipList(),
 	}
 
@@ -174,7 +174,7 @@ func (s *MvccInsertSuite) TestMVCCInsertMultipleAndScan() {
 	ctx3 := &executors.TransactionContext{
 		Tx:       tx3,
 		Clog:     s.clog,
-		Snapshot: tx3.Id(),
+		Snapshot: tx3.ID(),
 		XipList:  tx3.XipList(),
 	}
 
