@@ -90,7 +90,7 @@ func (s *BTreeScan) Next() (storage.Tuple, error) {
 
 			// check visibility if MVCC mode
 			if s.ctx != nil {
-				if !txRec.Visible(s.ctx.Snapshot, s.ctx.Clog, s.ctx.XipList) {
+				if !txRec.Visible(s.ctx.Snapshot, s.ctx.Clog) {
 					continue // skip invisible record
 				}
 			}

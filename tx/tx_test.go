@@ -30,20 +30,20 @@ func TestNextCID(t *testing.T) {
 	assert.Equal(t, uint32(2), tx.NextCID())
 }
 
-func TestSnapshotID(t *testing.T) {
+func TestManagerSnapshot(t *testing.T) {
 	mgr := NewManager()
 
-	// RepeatableRead: always returns tx.ID()
+	// RepeatableRead: the cutoff is always tx.ID()
 	tx1 := newTransaction(5, RepeatableRead)
-	assert.Equal(t, uint64(5), tx1.SnapshotID(mgr))
-	assert.Equal(t, uint64(5), tx1.SnapshotID(mgr)) // same every time
+	assert.Equal(t, uint64(5), mgr.Snapshot(tx1).Cutoff)
+	assert.Equal(t, uint64(5), mgr.Snapshot(tx1).Cutoff) // same every time
 
-	// ReadCommitted: returns new statement ID each time
+	// ReadCommitted: a new statement cutoff each time
 	tx2 := newTransaction(6, ReadCommitted)
-	snap1 := tx2.SnapshotID(mgr)
-	snap2 := tx2.SnapshotID(mgr)
-	assert.NotEqual(t, snap1, snap2, "ReadCommitted should return different snapshot IDs")
-	assert.True(t, snap2 > snap1, "snapshot IDs should be increasing")
+	snap1 := mgr.Snapshot(tx2).Cutoff
+	snap2 := mgr.Snapshot(tx2).Cutoff
+	assert.NotEqual(t, snap1, snap2, "ReadCommitted should return a new cutoff")
+	assert.True(t, snap2 > snap1, "cutoffs should be increasing")
 }
 
 func TestManager(t *testing.T) {

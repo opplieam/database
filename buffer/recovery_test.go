@@ -175,7 +175,7 @@ func TestRecoverRebuildsClog(t *testing.T) {
 	require.NoError(t, err)
 	rec, err := storage.DecodeTxRecord(raw)
 	require.NoError(t, err)
-	assert.True(t, rec.Visible(8, clog, nil), "row must be visible to a later transaction")
+	assert.True(t, rec.Visible(tx.Snapshot{TxID: 8, Cutoff: 8}, clog), "row must be visible to a later transaction")
 	require.NoError(t, poolB.Unpin(tag))
 }
 
@@ -349,7 +349,7 @@ func TestRecoverStopsAtTarget(t *testing.T) {
 				require.NoError(t, err)
 				rec, err := storage.DecodeTxRecord(raw)
 				require.NoError(t, err)
-				if rec.Visible(99, clog, nil) {
+				if rec.Visible(tx.Snapshot{TxID: 99, Cutoff: 99}, clog) {
 					visible++
 				}
 			}

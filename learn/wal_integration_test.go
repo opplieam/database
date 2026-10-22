@@ -44,8 +44,7 @@ func (s *WALSuite) writePooled(path string, pool *buffer.BufferPool, movies []st
 	ctx := &executors.TransactionContext{
 		Tx:       wtx,
 		Clog:     s.clog,
-		Snapshot: wtx.ID(),
-		XipList:  wtx.XipList(),
+		Snapshot: s.mgr.Snapshot(wtx),
 	}
 	for _, m := range movies {
 		ins := executors.NewPoolInsertMVCC(path, m, 0, ctx, pool)
@@ -61,8 +60,7 @@ func (s *WALSuite) scanPooled(path string, pool *buffer.BufferPool) []storage.Tu
 	rctx := &executors.TransactionContext{
 		Tx:       rtx,
 		Clog:     s.clog,
-		Snapshot: rtx.ID(),
-		XipList:  rtx.XipList(),
+		Snapshot: s.mgr.Snapshot(rtx),
 	}
 	scan, err := executors.NewPoolHeapScanMVCC(path, rctx, pool)
 	s.Require().NoError(err)

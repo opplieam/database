@@ -251,45 +251,45 @@ func DecodeTxRecord(buf []byte) (TxRecord, error) {
 
 // Visible determines if this record version is visible to a transaction.
 //
-// This function works with any isolation level.
-// The caller determines the snapshot ID:
-//   - REPEATABLE READ: pass tx.ID() (same snapshot for entire transaction)
-//   - READ COMMITTED: pass tx.SnapshotID(mgr) (new snapshot per statement)
+// This function works with any isolation level; the caller supplies the
+// snapshot a read uses:
+//   - REPEATABLE READ: one snapshot for the whole transaction, at tx.ID()
+//   - READ COMMITTED: a new snapshot per statement, from Manager.Snapshot
 //
-// The xip_list contains transaction IDs that were in-progress at snapshot time.
-// If the creator is in the xip_list, the record is invisible.
+// Snapshot.Xip holds the ids that were in-progress when the view was taken.
+// If the creator is in that set, the record is invisible.
 //
 // Visibility rules (simplified from PostgreSQL):
 //
 // A record is VISIBLE if:
 //  1. It's my own uncommitted change
-//  2. The creator is NOT in my xip_list (was not in-progress at snapshot)
+//  2. The creator is NOT in Snapshot.Xip (was not in-progress at snapshot)
 //  3. The creator committed before my snapshot
 //  4. It's not deleted, OR the delete hasn't happened yet
 //
 // A record is INVISIBLE if:
-//   - The creator is in my xip_list (was in-progress at snapshot)
+//   - The creator is in Snapshot.Xip (was in-progress at snapshot)
 //   - The creator hasn't committed (and it's not mine)
 //   - The creator committed after my snapshot
 //   - It was deleted before my snapshot
 //
 // Examples:
 //
-//	TxRecord{TxMin: 1, TxMax: 0}, xipList={}, clog has tx=1 committed
-//	  Visible(1, clog, xipList) → true   (my own change)
-//	  Visible(2, clog, xipList) → true   (created before tx=2, not deleted)
+//	TxRecord{TxMin: 1, TxMax: 0}, clog has tx=1 committed
+//	  Visible(tx.Snapshot{TxID: 1, Cutoff: 1}, clog) → true   (my own change)
+//	  Visible(tx.Snapshot{TxID: 2, Cutoff: 2}, clog) → true   (created before tx=2)
 //
-//	TxRecord{TxMin: 1, TxMax: 0}, xipList={1: true}, clog has tx=1 committed
-//	  Visible(1, clog, xipList) → true   (my own change)
-//	  Visible(2, clog, xipList) → false  (tx=1 was in-progress at snapshot)
-func (r TxRecord) Visible(currentTxId uint64, clog *tx.CommitLog, xipList map[uint64]bool) bool {
+//	TxRecord{TxMin: 1, TxMax: 0}, xip={1}, clog has tx=1 committed
+//	  Visible(tx.Snapshot{TxID: 1, Cutoff: 1, Xip: xip}, clog) → true   (my own change)
+//	  Visible(tx.Snapshot{TxID: 2, Cutoff: 2, Xip: xip}, clog) → false  (tx=1 in-progress)
+func (r TxRecord) Visible(snap tx.Snapshot, clog *tx.CommitLog) bool {
 	// My own changes are always visible
-	if r.TxMin == currentTxId {
+	if r.TxMin == snap.Cutoff {
 		return true
 	}
 
 	// If creator is in my xip_list → was in-progress at my snapshot → invisible
-	if xipList[r.TxMin] {
+	if snap.Xip[r.TxMin] {
 		return false
 	}
 
@@ -299,7 +299,7 @@ func (r TxRecord) Visible(currentTxId uint64, clog *tx.CommitLog, xipList map[ui
 	}
 
 	// Was the record created before or at my snapshot?
-	if r.TxMin > currentTxId {
+	if r.TxMin > snap.Cutoff {
 		return false
 	}
 
@@ -314,7 +314,7 @@ func (r TxRecord) Visible(currentTxId uint64, clog *tx.CommitLog, xipList map[ui
 	}
 
 	// Was the delete after my snapshot?
-	if r.TxMax > currentTxId {
+	if r.TxMax > snap.Cutoff {
 		return true
 	}
 

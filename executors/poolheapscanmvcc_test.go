@@ -25,8 +25,7 @@ func setupPooledMVCC(t *testing.T, filename string, titles []string) (*tx.Commit
 	wctx := &TransactionContext{
 		Tx:       wtx,
 		Clog:     clog,
-		Snapshot: wtx.ID(),
-		XipList:  wtx.XipList(),
+		Snapshot: mgr.Snapshot(wtx),
 	}
 	for i, title := range titles {
 		ins := NewInsert(filename, storage.MovieRecord{
@@ -47,8 +46,7 @@ func readCtx(mgr *tx.Manager, clog *tx.CommitLog) *TransactionContext {
 	return &TransactionContext{
 		Tx:       rtx,
 		Clog:     clog,
-		Snapshot: rtx.ID(),
-		XipList:  rtx.XipList(),
+		Snapshot: mgr.Snapshot(rtx),
 	}
 }
 

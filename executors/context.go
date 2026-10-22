@@ -9,16 +9,16 @@ import "database/tx"
 //
 // Example:
 //
+//	mgr := tx.NewManager()
+//	tx1 := mgr.Begin(tx.RepeatableRead)
 //	ctx := &TransactionContext{
 //	    Tx:       tx1,
 //	    Clog:     clog,
-//	    Snapshot: tx1.ID(),
-//	    XipList:  tx1.XipList(),
+//	    Snapshot: mgr.Snapshot(tx1),
 //	}
 //	scan := NewHeapFileScan("movies.data", ctx)
 type TransactionContext struct {
 	Tx       *tx.Transaction
 	Clog     *tx.CommitLog
-	Snapshot uint64
-	XipList  map[uint64]bool
+	Snapshot tx.Snapshot
 }

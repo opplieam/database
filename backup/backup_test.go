@@ -59,8 +59,7 @@ func insertPooled(t *testing.T, path string, pool *buffer.BufferPool,
 	ctx := &executors.TransactionContext{
 		Tx:       wtx,
 		Clog:     clog,
-		Snapshot: wtx.ID(),
-		XipList:  wtx.XipList(),
+		Snapshot: mgr.Snapshot(wtx),
 	}
 	ins := executors.NewPoolInsertMVCC(path, m, 0, ctx, pool)
 	_, err := ins.Next()

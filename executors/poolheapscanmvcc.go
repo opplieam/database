@@ -122,7 +122,7 @@ func (s *PoolHeapScanMVCC) Next() (storage.Tuple, error) {
 			if err != nil {
 				return nil, err
 			}
-			if txRec.Visible(s.ctx.Snapshot, s.ctx.Clog, s.ctx.XipList) {
+			if txRec.Visible(s.ctx.Snapshot, s.ctx.Clog) {
 				return txRec.Data, nil
 			}
 			// skip invisible record, continue loop

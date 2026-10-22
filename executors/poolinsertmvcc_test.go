@@ -26,8 +26,7 @@ func TestPoolInsertMVCCPlacesInMemory(t *testing.T) {
 	wctx := &TransactionContext{
 		Tx:       wtx,
 		Clog:     clog,
-		Snapshot: wtx.ID(),
-		XipList:  wtx.XipList(),
+		Snapshot: mgr.Snapshot(wtx),
 	}
 
 	ins := NewPoolInsertMVCC(path, storage.MovieRecord{
@@ -63,7 +62,7 @@ func TestPoolInsertMVCCCommittedVisible(t *testing.T) {
 
 	// Writer: pooled insert, then manager commit.
 	wtx := mgr.Begin(tx.RepeatableRead)
-	wctx := &TransactionContext{Tx: wtx, Clog: clog, Snapshot: wtx.ID(), XipList: wtx.XipList()}
+	wctx := &TransactionContext{Tx: wtx, Clog: clog, Snapshot: mgr.Snapshot(wtx)}
 	ins := NewPoolInsertMVCC(path, storage.MovieRecord{
 		MovieId: 1, Title: "Toy Story", Genres: "Genre",
 	}, 0, wctx, pool)
@@ -93,7 +92,7 @@ func TestPoolInsertMVCCFlushDurability(t *testing.T) {
 
 	pool := buffer.NewBufferPool(4)
 	wtx := mgr.Begin(tx.RepeatableRead)
-	wctx := &TransactionContext{Tx: wtx, Clog: clog, Snapshot: wtx.ID(), XipList: wtx.XipList()}
+	wctx := &TransactionContext{Tx: wtx, Clog: clog, Snapshot: mgr.Snapshot(wtx)}
 	ins := NewPoolInsertMVCC(path, storage.MovieRecord{
 		MovieId: 1, Title: "Toy Story", Genres: "Genre",
 	}, 0, wctx, pool)
@@ -123,7 +122,7 @@ func TestPoolInsertMVCCUnflushedLoss(t *testing.T) {
 
 	pool := buffer.NewBufferPool(4)
 	wtx := mgr.Begin(tx.RepeatableRead)
-	wctx := &TransactionContext{Tx: wtx, Clog: clog, Snapshot: wtx.ID(), XipList: wtx.XipList()}
+	wctx := &TransactionContext{Tx: wtx, Clog: clog, Snapshot: mgr.Snapshot(wtx)}
 	ins := NewPoolInsertMVCC(path, storage.MovieRecord{
 		MovieId: 1, Title: "Toy Story", Genres: "Genre",
 	}, 0, wctx, pool)
@@ -153,7 +152,7 @@ func TestPoolInsertMVCCGuards(t *testing.T) {
 	pool := buffer.NewBufferPool(4)
 	rec := storage.MovieRecord{MovieId: 1, Title: "Toy Story", Genres: "Genre"}
 	wtx := mgr.Begin(tx.RepeatableRead)
-	wctx := &TransactionContext{Tx: wtx, Clog: clog, Snapshot: wtx.ID(), XipList: wtx.XipList()}
+	wctx := &TransactionContext{Tx: wtx, Clog: clog, Snapshot: mgr.Snapshot(wtx)}
 
 	_, err = NewPoolInsertMVCC(path, rec, 0, nil, pool).Next()
 	assert.Error(t, err)
@@ -180,7 +179,7 @@ func TestPoolInsertStampsPageLSN(t *testing.T) {
 	pool := buffer.NewBufferPool(4)
 	pool.SetWAL(seg)
 	wtx := mgr.Begin(tx.RepeatableRead)
-	wctx := &TransactionContext{Tx: wtx, Clog: clog, Snapshot: wtx.ID(), XipList: wtx.XipList()}
+	wctx := &TransactionContext{Tx: wtx, Clog: clog, Snapshot: mgr.Snapshot(wtx)}
 	ins := NewPoolInsertMVCC(path, storage.MovieRecord{
 		MovieId: 1, Title: "Toy Story", Genres: "Genre",
 	}, 0, wctx, pool)
@@ -235,7 +234,7 @@ func TestPoolInsertCommitsToWAL(t *testing.T) {
 	pool := buffer.NewBufferPool(4)
 	pool.SetWAL(seg)
 	wtx := mgr.Begin(tx.RepeatableRead)
-	wctx := &TransactionContext{Tx: wtx, Clog: clog, Snapshot: wtx.ID(), XipList: wtx.XipList()}
+	wctx := &TransactionContext{Tx: wtx, Clog: clog, Snapshot: mgr.Snapshot(wtx)}
 	ins := NewPoolInsertMVCC(path, storage.MovieRecord{
 		MovieId: 1, Title: "Toy Story", Genres: "Genre",
 	}, 0, wctx, pool)

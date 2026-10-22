@@ -40,8 +40,7 @@ func (s *MvccInsertSuite) TestMVCCInsertAndScan() {
 	ctx := &executors.TransactionContext{
 		Tx:       tx1,
 		Clog:     s.clog,
-		Snapshot: tx1.ID(),
-		XipList:  tx1.XipList(),
+		Snapshot: s.mgr.Snapshot(tx1),
 	}
 
 	s.T().Logf("Step 2: Insert record with MVCC")
@@ -63,8 +62,7 @@ func (s *MvccInsertSuite) TestMVCCInsertAndScan() {
 	ctx2 := &executors.TransactionContext{
 		Tx:       tx2,
 		Clog:     s.clog,
-		Snapshot: tx2.ID(),
-		XipList:  tx2.XipList(),
+		Snapshot: s.mgr.Snapshot(tx2),
 	}
 
 	s.T().Logf("Step 5: Scan and verify record is visible")
@@ -85,8 +83,7 @@ func (s *MvccInsertSuite) TestMVCCInsertUncommitted() {
 	ctx := &executors.TransactionContext{
 		Tx:       tx1,
 		Clog:     s.clog,
-		Snapshot: tx1.ID(),
-		XipList:  tx1.XipList(),
+		Snapshot: s.mgr.Snapshot(tx1),
 	}
 
 	s.T().Logf("Step 2: Insert record WITHOUT commit")
@@ -105,8 +102,7 @@ func (s *MvccInsertSuite) TestMVCCInsertUncommitted() {
 	ctx2 := &executors.TransactionContext{
 		Tx:       tx2,
 		Clog:     s.clog,
-		Snapshot: tx2.ID(),
-		XipList:  tx2.XipList(),
+		Snapshot: s.mgr.Snapshot(tx2),
 	}
 
 	scan, err := executors.NewHeapFileScan("test_mvcc_uncommitted.data", ctx2)
@@ -125,8 +121,7 @@ func (s *MvccInsertSuite) TestMVCCInsertMultipleAndScan() {
 	ctx := &executors.TransactionContext{
 		Tx:       tx1,
 		Clog:     s.clog,
-		Snapshot: tx1.ID(),
-		XipList:  tx1.XipList(),
+		Snapshot: s.mgr.Snapshot(tx1),
 	}
 
 	movies := []storage.MovieRecord{
@@ -151,8 +146,7 @@ func (s *MvccInsertSuite) TestMVCCInsertMultipleAndScan() {
 	ctx2 := &executors.TransactionContext{
 		Tx:       tx2,
 		Clog:     s.clog,
-		Snapshot: tx2.ID(),
-		XipList:  tx2.XipList(),
+		Snapshot: s.mgr.Snapshot(tx2),
 	}
 
 	moreMovies := []storage.MovieRecord{
@@ -174,8 +168,7 @@ func (s *MvccInsertSuite) TestMVCCInsertMultipleAndScan() {
 	ctx3 := &executors.TransactionContext{
 		Tx:       tx3,
 		Clog:     s.clog,
-		Snapshot: tx3.ID(),
-		XipList:  tx3.XipList(),
+		Snapshot: s.mgr.Snapshot(tx3),
 	}
 
 	scan, err := executors.NewHeapFileScan("test_mvcc_multi.data", ctx3)

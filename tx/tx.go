@@ -29,6 +29,19 @@ const (
 	ReadCommitted
 )
 
+// Snapshot is the read view of one statement. TxID identifies the reader,
+// whose own uncommitted writes are visible to it. Cutoff bounds the ids the
+// view includes: an id at or above Cutoff started after the view was taken.
+// Xip holds the ids that were in flight at that moment.
+//
+// TxID and Cutoff are separate because they only coincide under
+// RepeatableRead. ReadCommitted reads at a cutoff unrelated to its own id.
+type Snapshot struct {
+	TxID   uint64
+	Cutoff uint64
+	Xip    map[uint64]bool
+}
+
 // Transaction is one unit of work: the statements between Begin and
 // Commit/Rollback, which take effect together or not at all. Manager.Begin is
 // the only way to create one and Manager.Commit or Manager.Rollback the only
@@ -46,7 +59,7 @@ type Transaction struct {
 	id             uint64
 	status         Status
 	cid            uint32 // command id counter (0, 1, 2, ...)
-	stmtCounter    uint64 // statement counter for ReadCommitted
+	stmtCounter    uint64 // ReadCommitted counter, advanced by Manager.Snapshot
 	isolationLevel Isolation
 	xipList        map[uint64]bool // in-progress txs at snapshot time
 }
@@ -84,32 +97,6 @@ func (t *Transaction) NextCID() uint32 {
 	return cid
 }
 
-// newStatement advances the statement counter and returns the new snapshot ID.
-// Under ReadCommitted it also refreshes xipList to the transactions currently
-// in flight, which is what makes each statement see a new snapshot.
-//
-// Callers should reach this through SnapshotID: a RepeatableRead transaction
-// must keep the xipList it captured at Begin.
-func (t *Transaction) newStatement(mgr *Manager) uint64 {
-	t.stmtCounter++
-	if t.isolationLevel == ReadCommitted {
-		t.xipList = mgr.ActiveTxIDs(t.id)
-	}
-	return t.stmtCounter
-}
-
-// SnapshotID returns the snapshot a read should use.
-//
-// RepeatableRead: returns tx.ID(), so every statement reads the same snapshot.
-// ReadCommitted: returns a new statement ID from newStatement, so each
-// statement reads a fresh one; that call also refreshes xipList.
-func (t *Transaction) SnapshotID(mgr *Manager) uint64 {
-	if t.isolationLevel == ReadCommitted {
-		return t.newStatement(mgr)
-	}
-	return t.id
-}
-
 // commit marks the transaction committed. Manager.Commit calls it and also
 // removes the transaction from the active set; calling it alone would leave a
 // finished transaction looking active.
@@ -121,14 +108,6 @@ func (t *Transaction) commit() {
 // removes the transaction from the active set.
 func (t *Transaction) rollback() {
 	t.status = StatusAborted
-}
-
-// XipList returns a copy of the ids that were in flight when this transaction
-// took its snapshot. The caller owns the result and may keep or modify it.
-// Under ReadCommitted, call it again after SnapshotID: each statement takes a
-// new snapshot.
-func (t *Transaction) XipList() map[uint64]bool {
-	return maps.Clone(t.xipList)
 }
 
 // Manager hands out transaction ids and keeps the set of transactions that are
@@ -174,6 +153,31 @@ func (m *Manager) Begin(isolationLevel Isolation) *Transaction {
 	return tx
 }
 
+// Snapshot returns the read view for the transaction's next statement.
+//
+// RepeatableRead: the view captured at Begin, cut off at the transaction's own
+// id. A transaction with a larger id started later, so its rows stay out.
+//
+// ReadCommitted: a fresh view on every call. The in-flight set is refreshed,
+// and the cutoff is the statement counter. The counter is not an id-space
+// bound; this keeps today's visibility exactly, and a later fix replaces it
+// with the manager's next id.
+func (m *Manager) Snapshot(tx *Transaction) Snapshot {
+	if tx.isolationLevel == ReadCommitted {
+		tx.stmtCounter++
+		return Snapshot{
+			TxID:   tx.id,
+			Cutoff: tx.stmtCounter,
+			Xip:    m.activeIDs(tx.id),
+		}
+	}
+	return Snapshot{
+		TxID:   tx.id,
+		Cutoff: tx.id,
+		Xip:    maps.Clone(tx.xipList),
+	}
+}
+
 // Commit marks the transaction committed and removes it from the active set.
 // It does not write the commit log: the executor calls Clog.LogCommit once the
 // WAL record is durable.
@@ -209,9 +213,9 @@ func (m *Manager) IsActive(txID uint64) bool {
 	return ok
 }
 
-// ActiveTxIDs returns the ids currently in flight, excluding excludeTxID. The
+// activeIDs returns the ids currently in flight, excluding excludeTxID. The
 // result is a copy, so the caller may keep or modify it.
-func (m *Manager) ActiveTxIDs(excludeTxID uint64) map[uint64]bool {
+func (m *Manager) activeIDs(excludeTxID uint64) map[uint64]bool {
 	result := make(map[uint64]bool)
 	for id := range m.active {
 		if id != excludeTxID {

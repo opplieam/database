@@ -112,7 +112,7 @@ func (h *HeapFileScan) Next() (storage.Tuple, error) {
 				if err != nil {
 					return nil, err
 				}
-				if txRec.Visible(h.ctx.Snapshot, h.ctx.Clog, h.ctx.XipList) {
+				if txRec.Visible(h.ctx.Snapshot, h.ctx.Clog) {
 					return txRec.Data, nil
 				}
 				// skip invisible record, continue loop

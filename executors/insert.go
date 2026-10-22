@@ -17,7 +17,7 @@ import (
 //
 // Example:
 //
-//	ctx := &TransactionContext{Tx: tx1, Clog: clog, Snapshot: tx1.ID()}
+//	ctx := &TransactionContext{Tx: tx1, Clog: clog, Snapshot: mgr.Snapshot(tx1)}
 //	insert := NewInsert("movies.data", storage.MovieRecord{999, "New Movie", "Action"}, 0, ctx)
 //	tuple, err := insert.Next()
 //	// tuple = {999, "New Movie", "Action"}, record is now in file with MVCC metadata

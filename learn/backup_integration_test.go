@@ -33,8 +33,7 @@ func (s *BackupSuite) insertPooled(path string, pool *buffer.BufferPool,
 	ctx := &executors.TransactionContext{
 		Tx:       wtx,
 		Clog:     clog,
-		Snapshot: wtx.ID(),
-		XipList:  wtx.XipList(),
+		Snapshot: s.mgr.Snapshot(wtx),
 	}
 	ins := executors.NewPoolInsertMVCC(path, m, 0, ctx, pool)
 	_, err := ins.Next()
@@ -49,8 +48,7 @@ func (s *BackupSuite) scanPooled(path string, pool *buffer.BufferPool,
 	ctx := &executors.TransactionContext{
 		Tx:       rtx,
 		Clog:     clog,
-		Snapshot: rtx.ID(),
-		XipList:  rtx.XipList(),
+		Snapshot: s.mgr.Snapshot(rtx),
 	}
 	scan, err := executors.NewPoolHeapScanMVCC(path, ctx, pool)
 	s.Require().NoError(err)
