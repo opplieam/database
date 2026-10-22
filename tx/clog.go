@@ -2,8 +2,14 @@ package tx
 
 import (
 	"encoding/binary"
+	"fmt"
+	"io"
 	"os"
 )
+
+// clogRecordSize is the fixed width of one on-disk entry: an 8-byte
+// transaction id followed by a 1-byte status.
+const clogRecordSize = 8 + 1
 
 // ClogStatus represents the status of a transaction in the commit log.
 type ClogStatus byte
@@ -14,27 +20,33 @@ const (
 	ClogStatusAborted    ClogStatus = 0x02
 )
 
-// CommitLog tracks transaction status on disk.
+// CommitLog records how each transaction ended, in memory and on disk.
 //
-// On-disk format (append-only):
+// The file is append-only and headerless: a flat sequence of fixed-size
+// records, read until EOF.
 //
-//	[4 bytes] record count (little-endian uint32)
-//	[N bytes] records: [8 bytes txId][1 byte status]
+//	[8 bytes txID, little-endian][1 byte status]
 //
-// TODO: Improve to buffer + flush for better performance.
-// Current: write-through (every commit → disk)
-// Future: in-memory buffer → periodic flush to disk
+// A later record for the same id replaces an earlier one, so logging a second
+// outcome overwrites the first on replay (the file itself keeps both).
+//
+// Each write is followed by an fsync, because the commit mark must be as
+// durable as the WAL record it follows. A CommitLog is not safe for concurrent
+// use.
+//
+// TODO: buffer writes and flush on a timer; today every record is written and
+// fsynced immediately, which is the durability choice, not an accident.
 type CommitLog struct {
 	file    *os.File
-	records map[uint64]ClogStatus // cache for fast reads
+	records map[uint64]ClogStatus // status by transaction id; rebuilt by load
 }
 
-// OpenCommitLog opens or creates a commit log file.
-// Loads existing records from disk into memory.
+// OpenCommitLog opens or creates the commit log at path and replays it into
+// memory. A file that does not exist yet starts empty.
 func OpenCommitLog(path string) (*CommitLog, error) {
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("tx: open commit log %q: %w", path, err)
 	}
 
 	cl := &CommitLog{
@@ -43,88 +55,94 @@ func OpenCommitLog(path string) (*CommitLog, error) {
 	}
 
 	if err := cl.load(); err != nil {
-		f.Close()
-		return nil, err
+		f.Close() // best effort: the log is unusable either way
+		return nil, fmt.Errorf("tx: load commit log %q: %w", path, err)
 	}
 
 	return cl, nil
 }
 
-// LogCommit records that a transaction committed.
-func (cl *CommitLog) LogCommit(txId uint64) error {
-	cl.records[txId] = ClogStatusCommitted
-	return cl.append(txId, ClogStatusCommitted)
+// LogCommit records that a transaction committed, in memory and on disk. It
+// syncs before returning, so a nil error means the mark is durable.
+func (cl *CommitLog) LogCommit(txID uint64) error {
+	cl.records[txID] = ClogStatusCommitted
+	return cl.append(txID, ClogStatusCommitted)
 }
 
-// LogAbort records that a transaction aborted.
-func (cl *CommitLog) LogAbort(txId uint64) error {
-	cl.records[txId] = ClogStatusAborted
-	return cl.append(txId, ClogStatusAborted)
+// LogAbort records that a transaction aborted, in memory and on disk. It syncs
+// before returning, so a nil error means the mark is durable.
+func (cl *CommitLog) LogAbort(txID uint64) error {
+	cl.records[txID] = ClogStatusAborted
+	return cl.append(txID, ClogStatusAborted)
 }
 
-// IsCommitted returns true if the transaction committed.
-func (cl *CommitLog) IsCommitted(txId uint64) bool {
-	return cl.records[txId] == ClogStatusCommitted
+// IsCommitted reports whether the transaction is known to have committed. An
+// unknown id is not committed.
+func (cl *CommitLog) IsCommitted(txID uint64) bool {
+	return cl.records[txID] == ClogStatusCommitted
 }
 
-// IsAborted returns true if the transaction aborted.
-func (cl *CommitLog) IsAborted(txId uint64) bool {
-	return cl.records[txId] == ClogStatusAborted
+// IsAborted reports whether the transaction is known to have aborted. An
+// unknown id is not aborted.
+func (cl *CommitLog) IsAborted(txID uint64) bool {
+	return cl.records[txID] == ClogStatusAborted
 }
 
-// IsInProgress returns true if the transaction is still in progress.
-func (cl *CommitLog) IsInProgress(txId uint64) bool {
-	status, ok := cl.records[txId]
+// IsInProgress reports whether the transaction has no recorded outcome. An
+// unknown id counts as in progress: it may be running, or it may have aborted
+// before reaching the log.
+func (cl *CommitLog) IsInProgress(txID uint64) bool {
+	status, ok := cl.records[txID]
 	if !ok {
 		return true // unknown = in progress
 	}
 	return status == ClogStatusInProgress
 }
 
-// Close closes the commit log file.
+// Close closes the log file. Reopen the same path to replay it.
 func (cl *CommitLog) Close() error {
 	return cl.file.Close()
 }
 
-// append writes a record to the file.
-func (cl *CommitLog) append(txId uint64, status ClogStatus) error {
-	// seek to end
-	if _, err := cl.file.Seek(0, os.SEEK_END); err != nil {
-		return err
+// append writes one record at the end of the file and syncs it. Write-through
+// is deliberate: the mark must not be lost if the process dies right after
+// append returns.
+func (cl *CommitLog) append(txID uint64, status ClogStatus) error {
+	if _, err := cl.file.Seek(0, io.SeekEnd); err != nil {
+		return fmt.Errorf("tx: seek commit log end: %w", err)
 	}
 
-	// write record: [8 bytes txId][1 byte status]
-	buf := make([]byte, 9)
-	binary.LittleEndian.PutUint64(buf[0:], txId)
+	buf := make([]byte, clogRecordSize)
+	binary.LittleEndian.PutUint64(buf[:8], txID)
 	buf[8] = byte(status)
 
 	if _, err := cl.file.Write(buf); err != nil {
-		return err
+		return fmt.Errorf("tx: write commit log record: %w", err)
 	}
-	// Sync the mark: it must be as durable as the WAL flush preceding it,
-	// or a crash could leave committed status with a lost log.
-	return cl.file.Sync()
+	if err := cl.file.Sync(); err != nil {
+		return fmt.Errorf("tx: sync commit log: %w", err)
+	}
+	return nil
 }
 
-// load reads all records from disk into memory.
-// File format: just records, no count header.
-// Each record: [8 bytes txId][1 byte status]
+// load replays every record from disk into the in-memory map, starting at the
+// beginning of the file. A later record for the same id replaces an earlier
+// one.
 func (cl *CommitLog) load() error {
-	// seek to start
-	if _, err := cl.file.Seek(0, os.SEEK_SET); err != nil {
-		return err
+	if _, err := cl.file.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("tx: seek commit log start: %w", err)
 	}
 
 	// read records until EOF
 	for {
-		recBuf := make([]byte, 9)
+		recBuf := make([]byte, clogRecordSize)
 		_, err := cl.file.Read(recBuf)
 		if err != nil {
 			break // EOF or error
 		}
-		txId := binary.LittleEndian.Uint64(recBuf[0:])
+		txID := binary.LittleEndian.Uint64(recBuf[:8])
 		status := ClogStatus(recBuf[8])
-		cl.records[txId] = status
+		cl.records[txID] = status
 	}
 
 	return nil

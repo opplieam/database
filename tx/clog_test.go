@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCommitLog(t *testing.T) {
@@ -43,10 +44,10 @@ func TestCommitLogPersistence(t *testing.T) {
 	clog1, err := OpenCommitLog(clogFile)
 	assert.NoError(t, err)
 
-	clog1.LogCommit(10)
-	clog1.LogAbort(20)
-	clog1.LogCommit(30)
-	clog1.Close()
+	require.NoError(t, clog1.LogCommit(10))
+	require.NoError(t, clog1.LogAbort(20))
+	require.NoError(t, clog1.LogCommit(30))
+	require.NoError(t, clog1.Close())
 
 	// Reopen and verify
 	clog2, err := OpenCommitLog(clogFile)
@@ -68,11 +69,11 @@ func TestCommitLogOverwrite(t *testing.T) {
 	defer clog.Close()
 
 	// Commit tx=1
-	clog.LogCommit(1)
+	require.NoError(t, clog.LogCommit(1))
 	assert.True(t, clog.IsCommitted(1))
 
 	// Abort tx=1 (overwrite)
-	clog.LogAbort(1)
+	require.NoError(t, clog.LogAbort(1))
 	assert.False(t, clog.IsCommitted(1))
 	assert.True(t, clog.IsAborted(1))
 }
