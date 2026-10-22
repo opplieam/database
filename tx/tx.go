@@ -3,6 +3,8 @@
 // under each isolation level, and records how each transaction ended.
 package tx
 
+import "maps"
+
 // Status is where a transaction stands in its lifecycle. Status changes once:
 // a transaction starts active and ends committed or aborted.
 type Status int
@@ -121,11 +123,12 @@ func (t *Transaction) rollback() {
 	t.status = StatusAborted
 }
 
-// XipList returns the ids that were in flight when this transaction took its
-// snapshot. The map is the transaction's own, not a copy, so callers must not
-// modify it.
+// XipList returns a copy of the ids that were in flight when this transaction
+// took its snapshot. The caller owns the result and may keep or modify it.
+// Under ReadCommitted, call it again after SnapshotID: each statement takes a
+// new snapshot.
 func (t *Transaction) XipList() map[uint64]bool {
-	return t.xipList
+	return maps.Clone(t.xipList)
 }
 
 // Manager hands out transaction ids and keeps the set of transactions that are
