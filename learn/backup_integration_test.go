@@ -17,11 +17,11 @@ import (
 
 type BackupSuite struct {
 	suite.Suite
-	mgr *tx.TxManager
+	mgr *tx.Manager
 }
 
 func (s *BackupSuite) SetupTest() {
-	s.mgr = tx.NewTxManager()
+	s.mgr = tx.NewManager()
 }
 
 // insertPooled writes one row through the pool in its own transaction:

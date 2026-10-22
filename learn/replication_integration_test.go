@@ -18,11 +18,11 @@ import (
 
 type ReplicationSuite struct {
 	suite.Suite
-	mgr *tx.TxManager
+	mgr *tx.Manager
 }
 
 func (s *ReplicationSuite) SetupTest() {
-	s.mgr = tx.NewTxManager()
+	s.mgr = tx.NewManager()
 }
 
 // newPrimary starts a cluster on disk: one empty page, log and commit

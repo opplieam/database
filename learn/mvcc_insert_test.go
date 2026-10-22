@@ -15,7 +15,7 @@ type MvccInsertSuite struct {
 	suite.Suite
 	clog     *tx.CommitLog
 	clogFile string
-	mgr      *tx.TxManager
+	mgr      *tx.Manager
 }
 
 func (s *MvccInsertSuite) SetupSuite() {
@@ -26,7 +26,7 @@ func (s *MvccInsertSuite) SetupSuite() {
 }
 
 func (s *MvccInsertSuite) SetupTest() {
-	s.mgr = tx.NewTxManager()
+	s.mgr = tx.NewManager()
 }
 
 func (s *MvccInsertSuite) TearDownSuite() {

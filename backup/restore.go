@@ -30,7 +30,7 @@ import (
 // is one start-point rule and it is the label's. The newest archive is
 // last onto c.WAL: it is the log that outlived the backup, and copying
 // it home is what supplies the replay window at all.
-func Restore(c Cluster, backupDir string, target time.Time, mgr *tx.TxManager) error {
+func Restore(c Cluster, backupDir string, target time.Time, mgr *tx.Manager) error {
 	label, err := wal.ReadBackupLabel(filepath.Join(backupDir, "backup_label"))
 	if err != nil {
 		return fmt.Errorf("backup: %w", err)

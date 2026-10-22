@@ -18,7 +18,7 @@ type WALSuite struct {
 	suite.Suite
 	clog     *tx.CommitLog
 	clogFile string
-	mgr      *tx.TxManager
+	mgr      *tx.Manager
 }
 
 func (s *WALSuite) SetupSuite() {
@@ -29,7 +29,7 @@ func (s *WALSuite) SetupSuite() {
 }
 
 func (s *WALSuite) SetupTest() {
-	s.mgr = tx.NewTxManager()
+	s.mgr = tx.NewManager()
 }
 
 func (s *WALSuite) TearDownSuite() {

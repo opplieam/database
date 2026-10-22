@@ -19,7 +19,7 @@ import (
 // log, control file, and archive directory, with the segment and pool
 // wired through SetWAL the way a running cluster has it.
 func newCluster(t *testing.T, dir string) (Cluster, *buffer.BufferPool,
-	*wal.Segment, *tx.CommitLog, *tx.TxManager) {
+	*wal.Segment, *tx.CommitLog, *tx.Manager) {
 	t.Helper()
 
 	c := Cluster{
@@ -46,13 +46,13 @@ func newCluster(t *testing.T, dir string) (Cluster, *buffer.BufferPool,
 
 	pool := buffer.NewBufferPool(4)
 	pool.SetWAL(seg)
-	return c, pool, seg, clog, tx.NewTxManager()
+	return c, pool, seg, clog, tx.NewManager()
 }
 
 // insertPooled writes one row through the pool in its own transaction:
 // insert record, commit record, CLOG mark. The real write path.
 func insertPooled(t *testing.T, path string, pool *buffer.BufferPool,
-	clog *tx.CommitLog, mgr *tx.TxManager, m storage.MovieRecord) {
+	clog *tx.CommitLog, mgr *tx.Manager, m storage.MovieRecord) {
 	t.Helper()
 
 	wtx := mgr.Begin(tx.RepeatableRead)

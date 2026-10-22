@@ -15,12 +15,12 @@ import (
 
 // setupPooledMVCC writes titles through the Insert executor in one committed
 // transaction, returning the clog and manager for reader transactions.
-func setupPooledMVCC(t *testing.T, filename string, titles []string) (*tx.CommitLog, *tx.TxManager) {
+func setupPooledMVCC(t *testing.T, filename string, titles []string) (*tx.CommitLog, *tx.Manager) {
 	t.Helper()
 	clog, err := tx.OpenCommitLog(filename + ".clog")
 	require.NoError(t, err)
 
-	mgr := tx.NewTxManager()
+	mgr := tx.NewManager()
 	wtx := mgr.Begin(tx.RepeatableRead)
 	wctx := &TransactionContext{
 		Tx:       wtx,
@@ -42,7 +42,7 @@ func setupPooledMVCC(t *testing.T, filename string, titles []string) (*tx.Commit
 }
 
 // readCtx opens a reader transaction for scanning.
-func readCtx(mgr *tx.TxManager, clog *tx.CommitLog) *TransactionContext {
+func readCtx(mgr *tx.Manager, clog *tx.CommitLog) *TransactionContext {
 	rtx := mgr.Begin(tx.RepeatableRead)
 	return &TransactionContext{
 		Tx:       rtx,

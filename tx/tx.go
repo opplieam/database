@@ -75,7 +75,7 @@ func (t *Transaction) NextCID() uint32 {
 // NOTE: This is only for ReadCommitted!
 // RepeatableRead does NOT call NewStatement.
 // RepeatableRead uses the fixed xip_list from Begin().
-func (t *Transaction) NewStatement(mgr *TxManager) uint64 {
+func (t *Transaction) NewStatement(mgr *Manager) uint64 {
 	t.stmtCounter++
 	if t.isolationLevel == ReadCommitted {
 		t.xipList = mgr.ActiveTxIds(t.id)
@@ -87,7 +87,7 @@ func (t *Transaction) NewStatement(mgr *TxManager) uint64 {
 //
 // RepeatableRead: returns tx.ID() (same snapshot for entire transaction)
 // ReadCommitted: returns tx.NewStatement() (new snapshot per statement)
-func (t *Transaction) SnapshotId(mgr *TxManager) uint64 {
+func (t *Transaction) SnapshotId(mgr *Manager) uint64 {
 	if t.isolationLevel == ReadCommitted {
 		return t.NewStatement(mgr)
 	}
@@ -109,31 +109,31 @@ func (t *Transaction) XipList() map[uint64]bool {
 	return t.xipList
 }
 
-// TxManager manages transaction creation and tracks active transactions.
+// Manager manages transaction creation and tracks active transactions.
 //
 // Example:
 //
-//	mgr := NewTxManager()
+//	mgr := NewManager()
 //	tx1 := mgr.Begin(RepeatableRead)  // TxId=1
 //	tx2 := mgr.Begin(ReadCommitted)   // TxId=2
 //	tx1.Commit()
 //	mgr.IsActive(1) → false
 //	mgr.IsActive(2) → true
-type TxManager struct {
+type Manager struct {
 	nextId uint64
 	active map[uint64]*Transaction
 }
 
-// NewTxManager creates a new TxManager.
-func NewTxManager() *TxManager {
-	return &TxManager{
+// NewManager creates a new Manager.
+func NewManager() *Manager {
+	return &Manager{
 		nextId: 1,
 		active: make(map[uint64]*Transaction),
 	}
 }
 
 // Begin starts a new transaction with the given isolation level.
-func (m *TxManager) Begin(isolationLevel IsolationLevel) *Transaction {
+func (m *Manager) Begin(isolationLevel IsolationLevel) *Transaction {
 	tx := NewTransaction(m.nextId, isolationLevel)
 
 	// Capture in-progress transactions at snapshot time
@@ -148,38 +148,38 @@ func (m *TxManager) Begin(isolationLevel IsolationLevel) *Transaction {
 }
 
 // Commit commits a transaction and removes it from active tracking.
-func (m *TxManager) Commit(tx *Transaction) {
+func (m *Manager) Commit(tx *Transaction) {
 	tx.Commit()
 	delete(m.active, tx.ID())
 }
 
 // NextID returns the next transaction id to hand out without allocating
 // it. Checkpoint saves it so recovery restores the counter past reuse.
-func (m *TxManager) NextID() uint64 { return m.nextId }
+func (m *Manager) NextID() uint64 { return m.nextId }
 
 // SetNextID moves the counter forward after recovery, so ids the log
 // already spent are never handed out a second time. A lower value is
 // ignored: rewinding would reuse ids that living rows still carry.
-func (m *TxManager) SetNextID(next uint64) {
+func (m *Manager) SetNextID(next uint64) {
 	if next > m.nextId {
 		m.nextId = next
 	}
 }
 
 // Rollback aborts a transaction and removes it from active tracking.
-func (m *TxManager) Rollback(tx *Transaction) {
+func (m *Manager) Rollback(tx *Transaction) {
 	tx.Rollback()
 	delete(m.active, tx.ID())
 }
 
 // IsActive returns true if the transaction is still active (not committed/aborted).
-func (m *TxManager) IsActive(txId uint64) bool {
+func (m *Manager) IsActive(txId uint64) bool {
 	_, ok := m.active[txId]
 	return ok
 }
 
 // ActiveTxIds returns a copy of active transaction IDs, excluding the specified tx.
-func (m *TxManager) ActiveTxIds(excludeTxId uint64) map[uint64]bool {
+func (m *Manager) ActiveTxIds(excludeTxId uint64) map[uint64]bool {
 	result := make(map[uint64]bool)
 	for id := range m.active {
 		if id != excludeTxId {

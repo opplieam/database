@@ -19,7 +19,7 @@ func TestPoolInsertMVCCPlacesInMemory(t *testing.T) {
 	clog, err := tx.OpenCommitLog(path + ".clog")
 	require.NoError(t, err)
 	defer clog.Close()
-	mgr := tx.NewTxManager()
+	mgr := tx.NewManager()
 
 	pool := buffer.NewBufferPool(4)
 	wtx := mgr.Begin(tx.RepeatableRead)
@@ -58,7 +58,7 @@ func TestPoolInsertMVCCCommittedVisible(t *testing.T) {
 	clog, err := tx.OpenCommitLog(path + ".clog")
 	require.NoError(t, err)
 	defer clog.Close()
-	mgr := tx.NewTxManager()
+	mgr := tx.NewManager()
 	pool := buffer.NewBufferPool(4)
 
 	// Writer: pooled insert, then manager commit.
@@ -89,7 +89,7 @@ func TestPoolInsertMVCCFlushDurability(t *testing.T) {
 	clog, err := tx.OpenCommitLog(path + ".clog")
 	require.NoError(t, err)
 	defer clog.Close()
-	mgr := tx.NewTxManager()
+	mgr := tx.NewManager()
 
 	pool := buffer.NewBufferPool(4)
 	wtx := mgr.Begin(tx.RepeatableRead)
@@ -119,7 +119,7 @@ func TestPoolInsertMVCCUnflushedLoss(t *testing.T) {
 	clog, err := tx.OpenCommitLog(path + ".clog")
 	require.NoError(t, err)
 	defer clog.Close()
-	mgr := tx.NewTxManager()
+	mgr := tx.NewManager()
 
 	pool := buffer.NewBufferPool(4)
 	wtx := mgr.Begin(tx.RepeatableRead)
@@ -148,7 +148,7 @@ func TestPoolInsertMVCCGuards(t *testing.T) {
 	clog, err := tx.OpenCommitLog(path + ".clog")
 	require.NoError(t, err)
 	defer clog.Close()
-	mgr := tx.NewTxManager()
+	mgr := tx.NewManager()
 
 	pool := buffer.NewBufferPool(4)
 	rec := storage.MovieRecord{MovieId: 1, Title: "Toy Story", Genres: "Genre"}
@@ -171,7 +171,7 @@ func TestPoolInsertStampsPageLSN(t *testing.T) {
 	clog, err := tx.OpenCommitLog(path + ".clog")
 	require.NoError(t, err)
 	defer clog.Close()
-	mgr := tx.NewTxManager()
+	mgr := tx.NewManager()
 
 	seg, err := wal.Open(filepath.Join(dir, "test.wal"))
 	require.NoError(t, err)
@@ -226,7 +226,7 @@ func TestPoolInsertCommitsToWAL(t *testing.T) {
 	clog, err := tx.OpenCommitLog(path + ".clog")
 	require.NoError(t, err)
 	defer clog.Close()
-	mgr := tx.NewTxManager()
+	mgr := tx.NewManager()
 
 	seg, err := wal.Open(filepath.Join(dir, "test.wal"))
 	require.NoError(t, err)

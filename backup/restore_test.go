@@ -33,12 +33,12 @@ func TestRestoreRefusesWithoutLabel(t *testing.T) {
 	c := newRestoreCluster(t, dir)
 	backupDir := filepath.Join(dir, "backup")
 
-	assert.Error(t, Restore(c, backupDir, time.Time{}, tx.NewTxManager()))
+	assert.Error(t, Restore(c, backupDir, time.Time{}, tx.NewManager()))
 
 	require.NoError(t, os.MkdirAll(backupDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "backup_label"),
 		[]byte("garbage"), 0644))
-	assert.Error(t, Restore(c, backupDir, time.Time{}, tx.NewTxManager()))
+	assert.Error(t, Restore(c, backupDir, time.Time{}, tx.NewManager()))
 }
 
 // The label names the archive the log must come from. When the newest
@@ -52,5 +52,5 @@ func TestRestoreRefusesLostArchive(t *testing.T) {
 	require.NoError(t, wal.WriteBackupLabel(filepath.Join(backupDir, "backup_label"),
 		wal.BackupLabel{RedoLSN: 8, NextXid: 1, ArchiveSeq: 1}))
 
-	assert.Error(t, Restore(c, backupDir, time.Time{}, tx.NewTxManager()))
+	assert.Error(t, Restore(c, backupDir, time.Time{}, tx.NewManager()))
 }

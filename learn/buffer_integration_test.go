@@ -18,7 +18,7 @@ type BufferSuite struct {
 	suite.Suite
 	clog     *tx.CommitLog
 	clogFile string
-	mgr      *tx.TxManager
+	mgr      *tx.Manager
 }
 
 func (s *BufferSuite) SetupSuite() {
@@ -29,7 +29,7 @@ func (s *BufferSuite) SetupSuite() {
 }
 
 func (s *BufferSuite) SetupTest() {
-	s.mgr = tx.NewTxManager()
+	s.mgr = tx.NewManager()
 }
 
 func (s *BufferSuite) TearDownSuite() {

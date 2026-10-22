@@ -46,7 +46,7 @@ type Standby struct {
 // that is where Restore takes the log from. A standby never archives;
 // it follows the primary's archive, so c.Archives normally points there.
 func Bootstrap(c backup.Cluster, backupDir string,
-	mgr *tx.TxManager) (*Standby, error) {
+	mgr *tx.Manager) (*Standby, error) {
 	if err := backup.Restore(c, backupDir, time.Time{}, mgr); err != nil {
 		return nil, err
 	}

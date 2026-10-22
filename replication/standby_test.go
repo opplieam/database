@@ -20,7 +20,7 @@ import (
 // log, control file, and archive directory, with the segment and pool
 // wired the way a running primary has them.
 func newCluster(t *testing.T, dir string) (backup.Cluster, *buffer.BufferPool,
-	*wal.Segment, *tx.CommitLog, *tx.TxManager) {
+	*wal.Segment, *tx.CommitLog, *tx.Manager) {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(dir, 0755))
 
@@ -46,7 +46,7 @@ func newCluster(t *testing.T, dir string) (backup.Cluster, *buffer.BufferPool,
 
 	pool := buffer.NewBufferPool(4)
 	pool.SetWAL(seg)
-	return c, pool, seg, clog, tx.NewTxManager()
+	return c, pool, seg, clog, tx.NewManager()
 }
 
 // standbyCluster names the paths a standby will occupy. Nothing is
@@ -64,7 +64,7 @@ func standbyCluster(dir string) backup.Cluster {
 // insertPooled writes one row through the pool in its own transaction:
 // insert record, commit record, CLOG mark. The real write path.
 func insertPooled(t *testing.T, path string, pool *buffer.BufferPool,
-	clog *tx.CommitLog, mgr *tx.TxManager, m storage.MovieRecord) {
+	clog *tx.CommitLog, mgr *tx.Manager, m storage.MovieRecord) {
 	t.Helper()
 
 	wtx := mgr.Begin(tx.RepeatableRead)
@@ -82,7 +82,7 @@ func insertPooled(t *testing.T, path string, pool *buffer.BufferPool,
 
 // scanRows reads every visible tuple through a fresh pool, opening the
 // cluster's CLOG the way a reader after a restart would.
-func scanRows(t *testing.T, c backup.Cluster, mgr *tx.TxManager) []storage.Tuple {
+func scanRows(t *testing.T, c backup.Cluster, mgr *tx.Manager) []storage.Tuple {
 	t.Helper()
 
 	clog, err := tx.OpenCommitLog(c.Clog)
@@ -107,7 +107,7 @@ func scanRows(t *testing.T, c backup.Cluster, mgr *tx.TxManager) []storage.Tuple
 // bootstrapScene builds a primary with Alice and Bob, backs it up, and
 // bootstraps a standby from that backup.
 func bootstrapScene(t *testing.T) (backup.Cluster, backup.Cluster,
-	*buffer.BufferPool, *wal.Segment, *tx.CommitLog, *tx.TxManager, *Standby) {
+	*buffer.BufferPool, *wal.Segment, *tx.CommitLog, *tx.Manager, *Standby) {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -149,7 +149,7 @@ func TestBootstrapCopiesBackup(t *testing.T) {
 func TestBootstrapRefusesMissingBackup(t *testing.T) {
 	dir := t.TempDir()
 	_, err := Bootstrap(standbyCluster(filepath.Join(dir, "standby")),
-		filepath.Join(dir, "missing"), tx.NewTxManager())
+		filepath.Join(dir, "missing"), tx.NewManager())
 	assert.Error(t, err)
 }
 

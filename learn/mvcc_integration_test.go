@@ -14,7 +14,7 @@ type MvccSuite struct {
 	suite.Suite
 	clog     *tx.CommitLog
 	clogFile string
-	mgr      *tx.TxManager
+	mgr      *tx.Manager
 }
 
 func (s *MvccSuite) SetupSuite() {
@@ -25,7 +25,7 @@ func (s *MvccSuite) SetupSuite() {
 }
 
 func (s *MvccSuite) SetupTest() {
-	s.mgr = tx.NewTxManager()
+	s.mgr = tx.NewManager()
 }
 
 func (s *MvccSuite) TearDownSuite() {
@@ -34,8 +34,8 @@ func (s *MvccSuite) TearDownSuite() {
 }
 
 func (s *MvccSuite) TestTxLifecycle() {
-	s.T().Logf("Step 1: Create TxManager")
-	mgr := tx.NewTxManager()
+	s.T().Logf("Step 1: Create transaction manager")
+	mgr := tx.NewManager()
 
 	s.T().Logf("Step 2: Begin two transactions")
 	tx1 := mgr.Begin(tx.RepeatableRead)

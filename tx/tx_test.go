@@ -31,7 +31,7 @@ func TestNextCID(t *testing.T) {
 }
 
 func TestSnapshotId(t *testing.T) {
-	mgr := NewTxManager()
+	mgr := NewManager()
 
 	// RepeatableRead: always returns tx.ID()
 	tx1 := NewTransaction(5, RepeatableRead)
@@ -46,8 +46,8 @@ func TestSnapshotId(t *testing.T) {
 	assert.True(t, snap2 > snap1, "snapshot IDs should be increasing")
 }
 
-func TestTxManager(t *testing.T) {
-	mgr := NewTxManager()
+func TestManager(t *testing.T) {
+	mgr := NewManager()
 
 	// Begin two transactions
 	tx1 := mgr.Begin(RepeatableRead)
@@ -69,8 +69,8 @@ func TestTxManager(t *testing.T) {
 	assert.False(t, mgr.IsActive(2))
 }
 
-func TestTxManagerMultiple(t *testing.T) {
-	mgr := NewTxManager()
+func TestManagerMultiple(t *testing.T) {
+	mgr := NewManager()
 
 	// Begin 5 transactions
 	transactions := make([]*Transaction, 5)
@@ -99,7 +99,7 @@ func TestTxManagerMultiple(t *testing.T) {
 }
 
 func TestSetNextIDOnlyMovesForward(t *testing.T) {
-	mgr := NewTxManager()
+	mgr := NewManager()
 	mgr.Begin(RepeatableRead) // spends id 1, counter now 2
 	require.Equal(t, uint64(2), mgr.NextID())
 
