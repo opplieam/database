@@ -8,21 +8,21 @@ import (
 )
 
 func TestTransaction(t *testing.T) {
-	tx := NewTransaction(1, RepeatableRead)
+	tx := newTransaction(1, RepeatableRead)
 
 	assert.Equal(t, uint64(1), tx.ID())
 	assert.Equal(t, StatusActive, tx.Status())
 
-	tx.Commit()
+	tx.commit()
 	assert.Equal(t, StatusCommitted, tx.Status())
 
-	tx2 := NewTransaction(2, ReadCommitted)
-	tx2.Rollback()
+	tx2 := newTransaction(2, ReadCommitted)
+	tx2.rollback()
 	assert.Equal(t, StatusAborted, tx2.Status())
 }
 
 func TestNextCID(t *testing.T) {
-	tx := NewTransaction(1, RepeatableRead)
+	tx := newTransaction(1, RepeatableRead)
 
 	// Each call returns incrementing CID
 	assert.Equal(t, uint32(0), tx.NextCID())
@@ -34,12 +34,12 @@ func TestSnapshotID(t *testing.T) {
 	mgr := NewManager()
 
 	// RepeatableRead: always returns tx.ID()
-	tx1 := NewTransaction(5, RepeatableRead)
+	tx1 := newTransaction(5, RepeatableRead)
 	assert.Equal(t, uint64(5), tx1.SnapshotID(mgr))
 	assert.Equal(t, uint64(5), tx1.SnapshotID(mgr)) // same every time
 
 	// ReadCommitted: returns new statement ID each time
-	tx2 := NewTransaction(6, ReadCommitted)
+	tx2 := newTransaction(6, ReadCommitted)
 	snap1 := tx2.SnapshotID(mgr)
 	snap2 := tx2.SnapshotID(mgr)
 	assert.NotEqual(t, snap1, snap2, "ReadCommitted should return different snapshot IDs")

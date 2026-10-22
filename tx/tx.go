@@ -26,10 +26,11 @@ const (
 //
 // Example lifecycle:
 //
-//	tx := NewTransaction(1, RepeatableRead)
+//	mgr := NewManager()
+//	tx := mgr.Begin(RepeatableRead)
 //	tx.Status() → StatusActive
 //	// ... do work ...
-//	tx.Commit()
+//	mgr.Commit(tx)
 //	tx.Status() → StatusCommitted
 type Transaction struct {
 	id             uint64
@@ -40,8 +41,8 @@ type Transaction struct {
 	xipList        map[uint64]bool // in-progress txs at snapshot time
 }
 
-// NewTransaction creates a new active transaction with the given id and isolation level.
-func NewTransaction(id uint64, isolationLevel Isolation) *Transaction {
+// newTransaction creates a new active transaction with the given id and isolation level.
+func newTransaction(id uint64, isolationLevel Isolation) *Transaction {
 	return &Transaction{id: id, status: StatusActive, isolationLevel: isolationLevel}
 }
 
@@ -68,14 +69,14 @@ func (t *Transaction) NextCID() uint32 {
 	return cid
 }
 
-// NewStatement returns a new snapshot ID for ReadCommitted isolation.
+// newStatement returns a new snapshot ID for ReadCommitted isolation.
 // Each call returns a unique, increasing ID.
 // It also refreshes xip_list.
 //
 // NOTE: This is only for ReadCommitted!
-// RepeatableRead does NOT call NewStatement.
+// RepeatableRead does NOT call newStatement.
 // RepeatableRead uses the fixed xip_list from Begin().
-func (t *Transaction) NewStatement(mgr *Manager) uint64 {
+func (t *Transaction) newStatement(mgr *Manager) uint64 {
 	t.stmtCounter++
 	if t.isolationLevel == ReadCommitted {
 		t.xipList = mgr.ActiveTxIDs(t.id)
@@ -86,21 +87,21 @@ func (t *Transaction) NewStatement(mgr *Manager) uint64 {
 // SnapshotID returns the appropriate snapshot ID based on isolation level.
 //
 // RepeatableRead: returns tx.ID() (same snapshot for entire transaction)
-// ReadCommitted: returns tx.NewStatement() (new snapshot per statement)
+// ReadCommitted: returns tx.newStatement(mgr) (new snapshot per statement)
 func (t *Transaction) SnapshotID(mgr *Manager) uint64 {
 	if t.isolationLevel == ReadCommitted {
-		return t.NewStatement(mgr)
+		return t.newStatement(mgr)
 	}
 	return t.id
 }
 
-// Commit marks the transaction as committed.
-func (t *Transaction) Commit() {
+// commit marks the transaction as committed.
+func (t *Transaction) commit() {
 	t.status = StatusCommitted
 }
 
-// Rollback marks the transaction as aborted.
-func (t *Transaction) Rollback() {
+// rollback marks the transaction as aborted.
+func (t *Transaction) rollback() {
 	t.status = StatusAborted
 }
 
@@ -114,27 +115,27 @@ func (t *Transaction) XipList() map[uint64]bool {
 // Example:
 //
 //	mgr := NewManager()
-//	tx1 := mgr.Begin(RepeatableRead)  // TxId=1
-//	tx2 := mgr.Begin(ReadCommitted)   // TxId=2
-//	tx1.Commit()
+//	tx1 := mgr.Begin(RepeatableRead)  // ID 1
+//	tx2 := mgr.Begin(ReadCommitted)   // ID 2
+//	mgr.Commit(tx1)
 //	mgr.IsActive(1) → false
 //	mgr.IsActive(2) → true
 type Manager struct {
-	nextId uint64
+	nextID uint64
 	active map[uint64]*Transaction
 }
 
 // NewManager creates a new Manager.
 func NewManager() *Manager {
 	return &Manager{
-		nextId: 1,
+		nextID: 1,
 		active: make(map[uint64]*Transaction),
 	}
 }
 
 // Begin starts a new transaction with the given isolation level.
 func (m *Manager) Begin(isolationLevel Isolation) *Transaction {
-	tx := NewTransaction(m.nextId, isolationLevel)
+	tx := newTransaction(m.nextID, isolationLevel)
 
 	// Capture in-progress transactions at snapshot time
 	tx.xipList = make(map[uint64]bool)
@@ -142,47 +143,47 @@ func (m *Manager) Begin(isolationLevel Isolation) *Transaction {
 		tx.xipList[id] = true
 	}
 
-	m.active[m.nextId] = tx
-	m.nextId++
+	m.active[m.nextID] = tx
+	m.nextID++
 	return tx
 }
 
 // Commit commits a transaction and removes it from active tracking.
 func (m *Manager) Commit(tx *Transaction) {
-	tx.Commit()
+	tx.commit()
 	delete(m.active, tx.ID())
 }
 
 // NextID returns the next transaction id to hand out without allocating
 // it. Checkpoint saves it so recovery restores the counter past reuse.
-func (m *Manager) NextID() uint64 { return m.nextId }
+func (m *Manager) NextID() uint64 { return m.nextID }
 
 // SetNextID moves the counter forward after recovery, so ids the log
 // already spent are never handed out a second time. A lower value is
 // ignored: rewinding would reuse ids that living rows still carry.
 func (m *Manager) SetNextID(next uint64) {
-	if next > m.nextId {
-		m.nextId = next
+	if next > m.nextID {
+		m.nextID = next
 	}
 }
 
 // Rollback aborts a transaction and removes it from active tracking.
 func (m *Manager) Rollback(tx *Transaction) {
-	tx.Rollback()
+	tx.rollback()
 	delete(m.active, tx.ID())
 }
 
 // IsActive returns true if the transaction is still active (not committed/aborted).
-func (m *Manager) IsActive(txId uint64) bool {
-	_, ok := m.active[txId]
+func (m *Manager) IsActive(txID uint64) bool {
+	_, ok := m.active[txID]
 	return ok
 }
 
 // ActiveTxIDs returns a copy of active transaction IDs, excluding the specified tx.
-func (m *Manager) ActiveTxIDs(excludeTxId uint64) map[uint64]bool {
+func (m *Manager) ActiveTxIDs(excludeTxID uint64) map[uint64]bool {
 	result := make(map[uint64]bool)
 	for id := range m.active {
-		if id != excludeTxId {
+		if id != excludeTxID {
 			result[id] = true
 		}
 	}

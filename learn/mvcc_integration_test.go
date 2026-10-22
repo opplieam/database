@@ -103,8 +103,8 @@ func (s *MvccSuite) TestSnapshotIsolationReadCommitted() {
 	tx1 := s.mgr.Begin(tx.ReadCommitted)
 
 	s.T().Logf("Step 3: tx2 reads initial data (first statement)")
-	snapshot1 := tx2.NewStatement(s.mgr)
-	s.T().Logf("  - tx2 xipList after NewStatement: %v (refreshed, tx1 is in-progress)", tx2.XipList())
+	snapshot1 := tx2.SnapshotID(s.mgr)
+	s.T().Logf("  - tx2 xipList after SnapshotID: %v (refreshed, tx1 is in-progress)", tx2.XipList())
 	s.True(rec.Visible(snapshot1, s.clog, tx2.XipList()), "tx2 sees initial record")
 
 	s.T().Logf("Step 4: tx1 updates and commits")
@@ -113,8 +113,8 @@ func (s *MvccSuite) TestSnapshotIsolationReadCommitted() {
 	s.clog.LogCommit(tx1.ID())
 
 	s.T().Logf("Step 5: tx2 reads again (NEW snapshot)")
-	snapshot2 := tx2.NewStatement(s.mgr)
-	s.T().Logf("  - tx2 xipList after NewStatement: %v (refreshed, tx1 is NO LONGER in xipList because it committed)", tx2.XipList())
+	snapshot2 := tx2.SnapshotID(s.mgr)
+	s.T().Logf("  - tx2 xipList after SnapshotID: %v (refreshed, tx1 is NO LONGER in xipList because it committed)", tx2.XipList())
 	s.T().Logf("  - Old version: TxMax=2, committed, 2 <= %d → delete BEFORE new snapshot → NOT visible", snapshot2)
 	s.False(oldRec.Visible(snapshot2, s.clog, tx2.XipList()), "tx2 does NOT see OLD version (delete before new snapshot)")
 
