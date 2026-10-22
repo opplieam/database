@@ -2,6 +2,7 @@ package tx
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -128,22 +129,42 @@ func (cl *CommitLog) append(txID uint64, status ClogStatus) error {
 // load replays every record from disk into the in-memory map, starting at the
 // beginning of the file. A later record for the same id replaces an earlier
 // one.
+//
+// A record cut short by a crash is dropped and truncated: it never finished
+// its durable write, so it cannot represent a committed transaction.
 func (cl *CommitLog) load() error {
 	if _, err := cl.file.Seek(0, io.SeekStart); err != nil {
 		return fmt.Errorf("tx: seek commit log start: %w", err)
 	}
 
-	// read records until EOF
 	for {
 		recBuf := make([]byte, clogRecordSize)
-		_, err := cl.file.Read(recBuf)
-		if err != nil {
-			break // EOF or error
+		n, err := io.ReadFull(cl.file, recBuf)
+		switch {
+		case err == nil:
+			// complete record; decode below
+		case errors.Is(err, io.EOF):
+			return nil
+		case errors.Is(err, io.ErrUnexpectedEOF):
+			return cl.dropTornTail(n)
+		default:
+			return fmt.Errorf("tx: read commit log: %w", err)
 		}
-		txID := binary.LittleEndian.Uint64(recBuf[:8])
-		status := ClogStatus(recBuf[8])
-		cl.records[txID] = status
-	}
 
+		txID := binary.LittleEndian.Uint64(recBuf[:8])
+		cl.records[txID] = ClogStatus(recBuf[8])
+	}
+}
+
+// dropTornTail removes the n trailing bytes left by an interrupted append, so
+// the next append starts on a record boundary.
+func (cl *CommitLog) dropTornTail(n int) error {
+	end, err := cl.file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return fmt.Errorf("tx: locate torn commit log tail: %w", err)
+	}
+	if err := cl.file.Truncate(end - int64(n)); err != nil {
+		return fmt.Errorf("tx: truncate torn commit log tail: %w", err)
+	}
 	return nil
 }

@@ -60,6 +60,34 @@ func TestCommitLogPersistence(t *testing.T) {
 	assert.False(t, clog2.IsCommitted(999))
 }
 
+func TestCommitLogTornTail(t *testing.T) {
+	clogFile := "test_clog_torn.data"
+	defer os.Remove(clogFile)
+
+	// One complete record (txID 1, committed), then 4 stray bytes as if a
+	// crash cut the next append short.
+	require.NoError(t, os.WriteFile(clogFile,
+		[]byte{1, 0, 0, 0, 0, 0, 0, 0, 1, 0xAA, 0xBB, 0xCC, 0xDD}, 0644))
+
+	clog, err := OpenCommitLog(clogFile)
+	require.NoError(t, err)
+	assert.True(t, clog.IsCommitted(1))
+
+	st, err := os.Stat(clogFile)
+	require.NoError(t, err)
+	assert.Equal(t, int64(clogRecordSize), st.Size(), "torn tail is truncated on open")
+
+	// Appends must still land on a record boundary.
+	require.NoError(t, clog.LogAbort(2))
+	require.NoError(t, clog.Close())
+
+	clog2, err := OpenCommitLog(clogFile)
+	require.NoError(t, err)
+	defer clog2.Close()
+	assert.True(t, clog2.IsCommitted(1))
+	assert.True(t, clog2.IsAborted(2))
+}
+
 func TestCommitLogOverwrite(t *testing.T) {
 	clogFile := "test_clog_overwrite.data"
 	defer os.Remove(clogFile)
