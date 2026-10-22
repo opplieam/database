@@ -13,13 +13,15 @@ import (
 const clogRecordSize = 8 + 1
 
 // clogStatus is how a record marks a transaction in the commit log. The zero
-// value, clogStatusInProgress, also stands for a transaction with no record.
+// value is clogStatusUnknown, so a missing map entry and an explicit "no
+// outcome" are the same value.
 type clogStatus byte
 
 const (
-	clogStatusInProgress clogStatus = 0x00
-	clogStatusCommitted  clogStatus = 0x01
-	clogStatusAborted    clogStatus = 0x02
+	clogStatusUnknown    clogStatus = 0x00 // zero value: no record at all
+	clogStatusCommitted  clogStatus = 0x01 // on-disk value from before Unknown existed
+	clogStatusAborted    clogStatus = 0x02 // on-disk value from before Unknown existed
+	clogStatusInProgress clogStatus = 0x03 // reserved; nothing writes it yet
 )
 
 // CommitLog records how each transaction ended, in memory and on disk.
@@ -28,6 +30,11 @@ const (
 // records, read until EOF.
 //
 //	[8 bytes txID, little-endian][1 byte status]
+//
+// The status byte is clogStatusCommitted (1), clogStatusAborted (2),
+// clogStatusInProgress (3), or clogStatusUnknown (0). Values 1 and 2 predate
+// Unknown and must not change: existing logs, backups, and replicas encode
+// them.
 //
 // A later record for the same id replaces an earlier one, so logging a second
 // outcome overwrites the first on replay (the file itself keeps both).
@@ -94,11 +101,8 @@ func (cl *CommitLog) IsAborted(txID uint64) bool {
 // unknown id counts as in progress: it may be running, or it may have aborted
 // before reaching the log.
 func (cl *CommitLog) IsInProgress(txID uint64) bool {
-	status, ok := cl.records[txID]
-	if !ok {
-		return true // unknown = in progress
-	}
-	return status == clogStatusInProgress
+	status := cl.records[txID] // a missing key yields clogStatusUnknown
+	return status == clogStatusUnknown || status == clogStatusInProgress
 }
 
 // Close closes the log file. Reopen the same path to replay it.
