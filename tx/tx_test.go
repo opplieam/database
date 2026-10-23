@@ -115,21 +115,21 @@ func TestManagerMultiple(t *testing.T) {
 	}
 }
 
-func TestSetNextIDOnlyMovesForward(t *testing.T) {
+func TestRestoreOnlyMovesForward(t *testing.T) {
 	mgr := NewManager()
 	mgr.Begin(RepeatableRead) // spends id 1, counter now 2
 	require.Equal(t, uint64(2), mgr.NextID())
 
 	// Recovery on a crash with nothing to replay returns zero. Taking it
 	// literally would rewind the counter onto ids living rows carry.
-	mgr.SetNextID(0)
+	mgr.Restore(0, mgr.Epoch())
 	assert.Equal(t, uint64(2), mgr.NextID())
 
-	mgr.SetNextID(1)
+	mgr.Restore(1, mgr.Epoch())
 	assert.Equal(t, uint64(2), mgr.NextID())
 
 	// A higher value from recovery moves it forward.
-	mgr.SetNextID(50)
+	mgr.Restore(50, mgr.Epoch())
 	assert.Equal(t, uint64(50), mgr.NextID())
 
 	// And the next Begin hands out the restored value.
@@ -138,7 +138,7 @@ func TestSetNextIDOnlyMovesForward(t *testing.T) {
 
 func TestRestoreAcceptsNewEpoch(t *testing.T) {
 	mgr := NewManager()
-	mgr.SetNextID(10)
+	mgr.Restore(10, mgr.Epoch())
 
 	// A post-wrap checkpoint has a smaller id but a higher epoch.
 	mgr.Restore(1, 1)
@@ -164,7 +164,7 @@ func TestRestoreAcceptsNewEpoch(t *testing.T) {
 
 func TestBeginSkipsFrozenID(t *testing.T) {
 	mgr := NewManager()
-	mgr.SetNextID(math.MaxUint64)
+	mgr.Restore(math.MaxUint64, mgr.Epoch())
 
 	last := mgr.Begin(RepeatableRead)
 	assert.Equal(t, uint64(math.MaxUint64), last.ID())
@@ -175,7 +175,7 @@ func TestBeginSkipsFrozenID(t *testing.T) {
 
 func TestBeginWrapAdvancesEpoch(t *testing.T) {
 	mgr := NewManager()
-	mgr.SetNextID(math.MaxUint64)
+	mgr.Restore(math.MaxUint64, mgr.Epoch())
 
 	last := mgr.Begin(RepeatableRead)
 	assert.Equal(t, uint64(math.MaxUint64), last.ID())

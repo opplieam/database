@@ -235,11 +235,6 @@ func (m *Manager) NextID() uint64 { return m.nextID }
 // recovery adopts a checkpoint from a later pass.
 func (m *Manager) Epoch() uint64 { return m.epoch }
 
-// SetNextID moves the counter forward inside the current epoch.
-func (m *Manager) SetNextID(next uint64) {
-	m.advance(next, m.epoch)
-}
-
 // Restore adopts a counter pair from recovery. A higher epoch wins even when
 // its id is numerically lower, which is what a wrap produces. Within one
 // epoch only a higher id moves the counter, so a stale pre-wrap checkpoint

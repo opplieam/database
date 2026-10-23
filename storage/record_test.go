@@ -203,7 +203,7 @@ func TestVisibleRepeatableReadSkipsPostWrapRow(t *testing.T) {
 func TestReadCommittedSnapshotAfterWrap(t *testing.T) {
 	clog := setupClog(t)
 	mgr := tx.NewManager()
-	mgr.SetNextID(math.MaxUint64)
+	mgr.Restore(math.MaxUint64, mgr.Epoch())
 
 	old := mgr.Begin(tx.ReadCommitted) // id MaxUint64
 	rec := TxRecord{TxMin: old.ID(), TxMax: 0, CID: 0, Data: Tuple{"A"}}
