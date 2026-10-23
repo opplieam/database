@@ -40,6 +40,11 @@ const (
 // A later record for the same id replaces an earlier one, so logging a second
 // outcome overwrites the first on replay (the file itself keeps both).
 //
+// Marks are scoped to the freeze window, not to an epoch. Vacuum freezes the
+// rows older than that window, then calls Purge to drop the marks those rows
+// no longer need. Purging an old epoch's marks before its ids come back around
+// is what stops the next epoch from inheriting them.
+//
 // Each write is followed by an fsync, because the commit mark must be as
 // durable as the WAL record it follows. A CommitLog is not safe for concurrent
 // use.

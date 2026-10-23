@@ -171,7 +171,7 @@ func NewManager() *Manager {
 // currently in flight as this transaction's snapshot, and adds the new
 // transaction to the active set. Finish it with Commit or Rollback. Spending
 // MaxUint64 advances the epoch before returning, so the next id is 1 of the
-// new pass and no checkpoint ever stores 0.
+// new epoch and no checkpoint ever stores 0.
 func (m *Manager) Begin(isolationLevel Isolation) *Transaction {
 	id := m.nextID
 
@@ -188,7 +188,7 @@ func (m *Manager) Begin(isolationLevel Isolation) *Transaction {
 	if m.nextID == FrozenTxID {
 		// MaxUint64 is spent. Step straight over the frozen marker on this
 		// call, so NextID is always checkpointable and the epoch already
-		// names the pass the next id belongs to.
+		// names the epoch the next id belongs to.
 		m.nextID = 1
 		m.epoch++
 	}
@@ -228,11 +228,13 @@ func (m *Manager) Commit(tx *Transaction) {
 }
 
 // NextID returns the next transaction id to hand out without allocating
-// it. Checkpoint saves it so recovery restores the counter past reuse.
+// it. Checkpoint saves it with the epoch, so recovery restores both the
+// counter and the epoch it belongs to.
 func (m *Manager) NextID() uint64 { return m.nextID }
 
 // Epoch returns how many times the id counter has gone around. It rises when
-// recovery adopts a checkpoint from a later pass.
+// Begin spends MaxUint64 and when recovery adopts a checkpoint from a later
+// epoch.
 func (m *Manager) Epoch() uint64 { return m.epoch }
 
 // Restore adopts a counter pair from recovery. A higher epoch wins even when
