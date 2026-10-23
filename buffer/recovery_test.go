@@ -1,6 +1,7 @@
 package buffer
 
 import (
+	"math"
 	"path/filepath"
 	"testing"
 	"time"
@@ -49,7 +50,7 @@ func TestRecoverReplaysUnflushedRow(t *testing.T) {
 	require.NoError(t, poolA.FlushAll())
 
 	// Checkpoint between the rows: replay meets skip-then-apply.
-	_, _, err = wal.Checkpoint(poolA, seg, ctl, 2)
+	_, _, err = wal.Checkpoint(poolA, seg, ctl, 2, 0)
 	require.NoError(t, err)
 
 	// Row B: place, log, stamp, never flush. The crash takes the pool.
@@ -72,7 +73,7 @@ func TestRecoverReplaysUnflushedRow(t *testing.T) {
 	require.NoError(t, err)
 	defer clog.Close()
 	poolB := NewBufferPool(4)
-	_, _, err = poolB.Recover(dataPath, seg2, ctl, clog, time.Time{})
+	_, _, _, err = poolB.Recover(dataPath, seg2, ctl, clog, time.Time{})
 	require.NoError(t, err)
 
 	// Both rows present exactly once, bitmap intact, stamp at row B.
@@ -103,7 +104,7 @@ func TestRecoverMissingControl(t *testing.T) {
 	require.NoError(t, err)
 	defer clog.Close()
 	pool := NewBufferPool(4)
-	_, _, err = pool.Recover(filepath.Join(dir, "nope.data"), seg, filepath.Join(dir, "missing.ctl"), clog, time.Time{})
+	_, _, _, err = pool.Recover(filepath.Join(dir, "nope.data"), seg, filepath.Join(dir, "missing.ctl"), clog, time.Time{})
 	assert.Error(t, err)
 }
 
@@ -132,7 +133,7 @@ func TestRecoverRebuildsClog(t *testing.T) {
 
 	// Checkpoint on the empty database: REDO lands at the tip, so both
 	// records appended next fall inside the recovery window.
-	_, _, err = wal.Checkpoint(poolA, seg, ctl, 1)
+	_, _, err = wal.Checkpoint(poolA, seg, ctl, 1, 0)
 	require.NoError(t, err)
 
 	// Transaction 7 writes a row and commits.
@@ -162,7 +163,7 @@ func TestRecoverRebuildsClog(t *testing.T) {
 	require.NoError(t, err)
 	defer seg2.Close()
 	poolB := NewBufferPool(4)
-	_, _, err = poolB.Recover(dataPath, seg2, ctl, clog, time.Time{})
+	_, _, _, err = poolB.Recover(dataPath, seg2, ctl, clog, time.Time{})
 	require.NoError(t, err)
 
 	assert.True(t, clog.IsCommitted(7), "replay must rebuild the commit mark")
@@ -194,7 +195,7 @@ func TestRecoverAdvancesNextXid(t *testing.T) {
 
 	// The checkpoint records the counter at 5. No later checkpoint
 	// follows, so anything above 5 must come from replayed records.
-	_, _, err = wal.Checkpoint(poolA, seg, ctl, 5)
+	_, _, err = wal.Checkpoint(poolA, seg, ctl, 5, 0)
 	require.NoError(t, err)
 
 	// Transactions 5 through 9 spend ids inside the window.
@@ -213,7 +214,7 @@ func TestRecoverAdvancesNextXid(t *testing.T) {
 	require.NoError(t, err)
 	defer seg2.Close()
 	poolB := NewBufferPool(4)
-	nextXid, _, err := poolB.Recover(filepath.Join(dir, "unused.data"), seg2, ctl, clog, time.Time{})
+	nextXid, _, _, err := poolB.Recover(filepath.Join(dir, "unused.data"), seg2, ctl, clog, time.Time{})
 	require.NoError(t, err)
 
 	// 9 was spent, so the next free id is 10. The checkpoint's 5 is stale.
@@ -235,7 +236,7 @@ func TestRecoverKeepsCheckpointCounter(t *testing.T) {
 
 	// Checkpoint with the counter at 20, then nothing at all. The window
 	// is empty, so the only source for the counter is the checkpoint.
-	_, _, err = wal.Checkpoint(poolA, seg, ctl, 20)
+	_, _, err = wal.Checkpoint(poolA, seg, ctl, 20, 0)
 	require.NoError(t, err)
 	require.NoError(t, seg.Close())
 
@@ -247,7 +248,7 @@ func TestRecoverKeepsCheckpointCounter(t *testing.T) {
 	require.NoError(t, err)
 	defer seg2.Close()
 	poolB := NewBufferPool(4)
-	nextXid, _, err := poolB.Recover(filepath.Join(dir, "unused.data"), seg2, ctl, clog, time.Time{})
+	nextXid, _, _, err := poolB.Recover(filepath.Join(dir, "unused.data"), seg2, ctl, clog, time.Time{})
 	require.NoError(t, err)
 
 	assert.Equal(t, uint64(20), nextXid, "the checkpoint's counter is the floor")
@@ -281,7 +282,7 @@ func buildFourCommits(t *testing.T, dir string) (dataPath, ctl, walPath string, 
 
 	// Checkpoint first: REDO lands at the tip, so every transaction below
 	// falls inside the recovery window.
-	_, _, err = wal.Checkpoint(pool, seg, ctl, 1)
+	_, _, err = wal.Checkpoint(pool, seg, ctl, 1, 0)
 	require.NoError(t, err)
 
 	page, err := pool.Get(tag)
@@ -334,7 +335,7 @@ func TestRecoverStopsAtTarget(t *testing.T) {
 			require.NoError(t, err)
 			defer seg.Close()
 			pool := NewBufferPool(4)
-			_, _, err = pool.Recover(dataPath, seg, ctl, clog, tc.target)
+			_, _, _, err = pool.Recover(dataPath, seg, ctl, clog, tc.target)
 			require.NoError(t, err)
 
 			// Visibility, not row count, is what an operator sees. Each
@@ -374,7 +375,7 @@ func TestRecoverReportsStopLSN(t *testing.T) {
 	seg, err := wal.Open(walPath)
 	require.NoError(t, err)
 	pool := NewBufferPool(4)
-	_, stopLSN, err := pool.Recover(dataPath, seg, ctl, clog,
+	_, _, stopLSN, err := pool.Recover(dataPath, seg, ctl, clog,
 		targetBase.Add(2500*time.Millisecond))
 	require.NoError(t, err)
 	assert.Equal(t, commitLSNs[2], stopLSN)
@@ -385,7 +386,117 @@ func TestRecoverReportsStopLSN(t *testing.T) {
 	require.NoError(t, err)
 	defer seg2.Close()
 	pool2 := NewBufferPool(4)
-	_, stopLSN, err = pool2.Recover(dataPath, seg2, ctl, clog, time.Time{})
+	_, _, stopLSN, err = pool2.Recover(dataPath, seg2, ctl, clog, time.Time{})
 	require.NoError(t, err)
 	assert.Equal(t, seg2.End(), stopLSN)
+}
+
+// A stale control file can put an old checkpoint back in the replay window.
+// The pair decides: a higher epoch wins even when its id is numerically
+// smaller, so the counter cannot be rewound onto the previous pass.
+func TestRecoverPrefersHigherEpoch(t *testing.T) {
+	dir := t.TempDir()
+	ctl := filepath.Join(dir, "test.ctl")
+	seg, err := wal.Open(filepath.Join(dir, "test.wal"))
+	require.NoError(t, err)
+
+	poolA := NewBufferPool(4)
+	poolA.SetWAL(seg)
+
+	// A pre-wrap checkpoint, then a post-wrap one with a smaller id but a
+	// higher epoch.
+	first, firstRedo, err := wal.Checkpoint(poolA, seg, ctl, math.MaxUint64, 0)
+	require.NoError(t, err)
+	_, _, err = wal.Checkpoint(poolA, seg, ctl, 2, 1)
+	require.NoError(t, err)
+
+	// Start replay at the first checkpoint, as a stale control file would.
+	require.NoError(t, wal.WriteControl(ctl, first, firstRedo))
+	require.NoError(t, seg.Close())
+
+	clog, err := tx.OpenCommitLog(filepath.Join(dir, "test.clog"))
+	require.NoError(t, err)
+	defer clog.Close()
+
+	seg2, err := wal.Open(filepath.Join(dir, "test.wal"))
+	require.NoError(t, err)
+	defer seg2.Close()
+
+	poolB := NewBufferPool(4)
+	nextXid, epoch, _, err := poolB.Recover(
+		filepath.Join(dir, "unused.data"), seg2, ctl, clog, time.Time{})
+	require.NoError(t, err)
+
+	assert.Equal(t, uint64(1), epoch)
+	assert.Equal(t, uint64(2), nextXid, "the higher epoch wins over the larger id")
+}
+
+// The checkpoint still names MaxUint64; the wrap that follows has no
+// checkpoint of its own, as after a crash.
+func TestRecoverDetectsWrapWithoutCheckpoint(t *testing.T) {
+	dir := t.TempDir()
+	ctl := filepath.Join(dir, "test.ctl")
+	seg, err := wal.Open(filepath.Join(dir, "test.wal"))
+	require.NoError(t, err)
+
+	poolA := NewBufferPool(4)
+	poolA.SetWAL(seg)
+	_, _, err = wal.Checkpoint(poolA, seg, ctl, math.MaxUint64, 0)
+	require.NoError(t, err)
+	for _, xid := range []uint64{math.MaxUint64, 1, 2} {
+		_, err := seg.Append(&wal.Record{Xid: xid, Type: wal.RecordCommit,
+			Payload: wal.PayloadCommit(1)})
+		require.NoError(t, err)
+	}
+	require.NoError(t, seg.Close())
+
+	clog, err := tx.OpenCommitLog(filepath.Join(dir, "test.clog"))
+	require.NoError(t, err)
+	defer clog.Close()
+
+	seg2, err := wal.Open(filepath.Join(dir, "test.wal"))
+	require.NoError(t, err)
+	defer seg2.Close()
+
+	poolB := NewBufferPool(4)
+	nextXid, epoch, _, err := poolB.Recover(
+		filepath.Join(dir, "unused.data"), seg2, ctl, clog, time.Time{})
+	require.NoError(t, err)
+
+	assert.Equal(t, uint64(1), epoch)
+	assert.Equal(t, uint64(3), nextXid)
+}
+
+// A transaction that began before the checkpoint can commit after it. Its id
+// sits below the floor and must not look like a wrap.
+func TestRecoverIgnoresIDsBelowCheckpoint(t *testing.T) {
+	dir := t.TempDir()
+	ctl := filepath.Join(dir, "test.ctl")
+	seg, err := wal.Open(filepath.Join(dir, "test.wal"))
+	require.NoError(t, err)
+
+	poolA := NewBufferPool(4)
+	poolA.SetWAL(seg)
+	_, _, err = wal.Checkpoint(poolA, seg, ctl, 10, 0)
+	require.NoError(t, err)
+	_, err = seg.Append(&wal.Record{Xid: 5, Type: wal.RecordCommit,
+		Payload: wal.PayloadCommit(1)})
+	require.NoError(t, err)
+	require.NoError(t, seg.Close())
+
+	clog, err := tx.OpenCommitLog(filepath.Join(dir, "test.clog"))
+	require.NoError(t, err)
+	defer clog.Close()
+
+	seg2, err := wal.Open(filepath.Join(dir, "test.wal"))
+	require.NoError(t, err)
+	defer seg2.Close()
+
+	poolB := NewBufferPool(4)
+	nextXid, epoch, _, err := poolB.Recover(
+		filepath.Join(dir, "unused.data"), seg2, ctl, clog, time.Time{})
+	require.NoError(t, err)
+
+	assert.Equal(t, uint64(10), nextXid)
+	assert.Equal(t, uint64(0), epoch)
 }

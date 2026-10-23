@@ -151,23 +151,33 @@ func ParseInsert(payload []byte) (uint32, uint16, uint8, []byte, error) {
 
 // Checkpoint payload layout, little-endian:
 //
-//	[0-7] redo_lsn: replay starts here
-//	[8-15] next_xid: transaction id counter to restore
-func PayloadCheckpoint(redo LSN, nextXid uint64) []byte {
-	payload := make([]byte, 16)
+//	[0-7]   redo_lsn: replay starts here
+//	[8-15]  next_xid: transaction id counter to restore
+//	[16-23] epoch: how many times the id counter has wrapped
+//
+// Payloads written before epochs end after next_xid; ParseCheckpoint reads
+// those as epoch 0.
+func PayloadCheckpoint(redo LSN, nextXid, epoch uint64) []byte {
+	payload := make([]byte, 24)
 	binary.LittleEndian.PutUint64(payload[0:], uint64(redo))
 	binary.LittleEndian.PutUint64(payload[8:], nextXid)
+	binary.LittleEndian.PutUint64(payload[16:], epoch)
 	return payload
 }
 
-// ParseCheckpoint splits a checkpoint payload into REDO LSN and the
-// next transaction id.
-func ParseCheckpoint(payload []byte) (LSN, uint64, error) {
+// ParseCheckpoint splits a checkpoint payload into REDO LSN, the next
+// transaction id, and the epoch. A pre-epoch payload reads as epoch 0.
+func ParseCheckpoint(payload []byte) (LSN, uint64, uint64, error) {
 	if len(payload) < 16 {
-		return 0, 0, fmt.Errorf("wal: %d bytes too short for checkpoint payload", len(payload))
+		return 0, 0, 0, fmt.Errorf("wal: %d bytes too short for checkpoint payload", len(payload))
 	}
-	return LSN(binary.LittleEndian.Uint64(payload[0:])),
-		binary.LittleEndian.Uint64(payload[8:]), nil
+	redo := LSN(binary.LittleEndian.Uint64(payload[0:]))
+	nextXid := binary.LittleEndian.Uint64(payload[8:])
+	var epoch uint64
+	if len(payload) >= 24 {
+		epoch = binary.LittleEndian.Uint64(payload[16:])
+	}
+	return redo, nextXid, epoch, nil
 }
 
 // Commit payload layout, little-endian:

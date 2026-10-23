@@ -29,15 +29,16 @@ type Flusher interface{ FlushAll() error }
 // between capture and write, so REDO equals the checkpoint record's LSN;
 // replay meets it first and skips it. Control write is tmp plus rename:
 // a crash never leaves a half-written publish. The record belongs to no
-// transaction, so Xid stays 0.
-func Checkpoint(flusher Flusher, seg *Segment, ctlPath string, nextXid uint64) (LSN, LSN, error) {
+// transaction, so Xid stays 0. Its payload carries the next id and the
+// epoch, so recovery can tell passes around the id space apart.
+func Checkpoint(flusher Flusher, seg *Segment, ctlPath string, nextXid, epoch uint64) (LSN, LSN, error) {
 	redo := seg.End()
 	if err := flusher.FlushAll(); err != nil {
 		return 0, 0, err
 	}
 	checkpoint, err := seg.Append(&Record{
 		Type:    RecordCheckpoint,
-		Payload: PayloadCheckpoint(redo, nextXid),
+		Payload: PayloadCheckpoint(redo, nextXid, epoch),
 	})
 	if err != nil {
 		return 0, 0, err

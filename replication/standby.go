@@ -95,7 +95,7 @@ func (s *Standby) CatchUp(primary *wal.Segment) (Status, error) {
 	}
 
 	// Recover flushes the pages it touched before returning.
-	_, applied, err := s.pool.Recover(s.Cluster.Data, s.seg,
+	_, _, applied, err := s.pool.Recover(s.Cluster.Data, s.seg,
 		s.Cluster.Ctl, s.clog, time.Time{})
 	if err != nil {
 		return Status{}, err

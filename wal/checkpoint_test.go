@@ -31,7 +31,7 @@ func TestCheckpoint(t *testing.T) {
 	require.NoError(t, err)
 
 	flusher := &fakeFlusher{}
-	checkpoint, redo, err := Checkpoint(flusher, seg, ctl, 9)
+	checkpoint, redo, err := Checkpoint(flusher, seg, ctl, 9, 0)
 	require.NoError(t, err)
 
 	// Single-threaded: nothing appends between capture and write.
@@ -53,15 +53,16 @@ func TestCheckpoint(t *testing.T) {
 	require.Len(t, tail, 2)
 	assert.Equal(t, RecordCheckpoint, tail[1].Type)
 	assert.Equal(t, lsn1, tail[1].PrevLSN)
-	gotRedo, gotNext, err := ParseCheckpoint(tail[1].Payload)
+	gotRedo, gotNext, gotEpoch, err := ParseCheckpoint(tail[1].Payload)
 	require.NoError(t, err)
 	assert.Equal(t, redo, gotRedo)
 	assert.Equal(t, uint64(9), gotNext)
+	assert.Equal(t, uint64(0), gotEpoch)
 
 	// A second round advances both LSNs past the first checkpoint.
 	_, err = seg.Append(&Record{Xid: 2, Type: RecordCommit})
 	require.NoError(t, err)
-	checkpoint2, redo2, err := Checkpoint(flusher, seg, ctl, 10)
+	checkpoint2, redo2, err := Checkpoint(flusher, seg, ctl, 10, 0)
 	require.NoError(t, err)
 	assert.Greater(t, checkpoint2, checkpoint)
 	assert.Equal(t, checkpoint2, redo2)

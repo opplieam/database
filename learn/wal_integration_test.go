@@ -95,7 +95,7 @@ func (s *WALSuite) TestCrashRecovery() {
 	s.Require().NoError(pool.FlushAll())
 
 	s.T().Logf("Step 3: Checkpoint bounds recovery from here")
-	checkpoint, redo, err := wal.Checkpoint(pool, seg, ctl, s.mgr.NextID())
+	checkpoint, redo, err := wal.Checkpoint(pool, seg, ctl, s.mgr.NextID(), s.mgr.Epoch())
 	s.Require().NoError(err)
 	s.T().Logf("  - checkpoint %d, redo %d (equal: nothing appends mid-checkpoint)", checkpoint, redo)
 
@@ -111,9 +111,9 @@ func (s *WALSuite) TestCrashRecovery() {
 	s.Require().NoError(err)
 	defer seg2.Close()
 	pool2 := buffer.NewBufferPool(4)
-	nextXid, _, err := pool2.Recover(path, seg2, ctl, s.clog, time.Time{})
+	nextXid, epoch, _, err := pool2.Recover(path, seg2, ctl, s.clog, time.Time{})
 	s.Require().NoError(err)
-	s.mgr.SetNextID(nextXid)
+	s.mgr.Restore(nextXid, epoch)
 
 	s.T().Logf("Step 6: All 3 rows visible exactly once through the fresh pool")
 	result := s.scanPooled(path, pool2)
@@ -140,7 +140,7 @@ func (s *WALSuite) TestFlushedRecordSkipped() {
 	pool.SetWAL(seg)
 
 	s.T().Logf("Step 1: Checkpoint on the empty db, REDO at the tip")
-	_, _, err = wal.Checkpoint(pool, seg, ctl, s.mgr.NextID())
+	_, _, err = wal.Checkpoint(pool, seg, ctl, s.mgr.NextID(), s.mgr.Epoch())
 	s.Require().NoError(err)
 
 	s.T().Logf("Step 2: Insert row A and flush (durable with its LSN)")
@@ -161,9 +161,9 @@ func (s *WALSuite) TestFlushedRecordSkipped() {
 	s.Require().NoError(err)
 	defer seg2.Close()
 	pool2 := buffer.NewBufferPool(4)
-	nextXid, _, err := pool2.Recover(path, seg2, ctl, s.clog, time.Time{})
+	nextXid, epoch, _, err := pool2.Recover(path, seg2, ctl, s.clog, time.Time{})
 	s.Require().NoError(err)
-	s.mgr.SetNextID(nextXid)
+	s.mgr.Restore(nextXid, epoch)
 
 	s.T().Logf("Step 5: Both rows present, A exactly once")
 	result := s.scanPooled(path, pool2)

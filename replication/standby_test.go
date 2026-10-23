@@ -118,7 +118,7 @@ func bootstrapScene(t *testing.T) (backup.Cluster, backup.Cluster,
 	})
 
 	backupDir := filepath.Join(dir, "backup")
-	require.NoError(t, backup.Backup(c, backupDir, pool, seg, mgr.NextID()))
+	require.NoError(t, backup.Backup(c, backupDir, pool, seg, mgr.NextID(), mgr.Epoch()))
 
 	sc := standbyCluster(filepath.Join(dir, "standby"))
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "standby"), 0755))

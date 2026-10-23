@@ -33,7 +33,7 @@ type Cluster struct {
 // would leave mid-copy changes in neither place: the pages predate
 // them, and replay starts past them.
 func Backup(c Cluster, outDir string, flusher wal.Flusher,
-	seg *wal.Segment, nextXid uint64) error {
+	seg *wal.Segment, nextXid, epoch uint64) error {
 
 	// Refuse a finished backup before writing anything: the label is
 	// the completion marker, published last, so a directory holding
@@ -51,7 +51,7 @@ func Backup(c Cluster, outDir string, flusher wal.Flusher,
 
 	// 1. Checkpoint: flushes pages and publishes the control file
 	//    carrying checkpoint and REDO.
-	_, redo, err := wal.Checkpoint(flusher, seg, c.Ctl, nextXid)
+	_, redo, err := wal.Checkpoint(flusher, seg, c.Ctl, nextXid, epoch)
 	if err != nil {
 		return err
 	}

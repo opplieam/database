@@ -1,6 +1,7 @@
 package wal
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -37,7 +38,7 @@ func TestRecordRoundTrip(t *testing.T) {
 				Xid:     0,
 				Type:    RecordCheckpoint,
 				PrevLSN: 100,
-				Payload: PayloadCheckpoint(64, 8),
+				Payload: PayloadCheckpoint(64, 8, 0),
 			},
 		},
 	}
@@ -90,10 +91,21 @@ func TestPayloadHelpers(t *testing.T) {
 	assert.Equal(t, uint8(3), bitmap)
 	assert.Equal(t, []byte{4, 5}, row)
 
-	redo, nextXid, err := ParseCheckpoint(PayloadCheckpoint(512, 9))
+	redo, nextXid, epoch, err := ParseCheckpoint(PayloadCheckpoint(512, 9, 3))
 	require.NoError(t, err)
 	assert.Equal(t, LSN(512), redo)
 	assert.Equal(t, uint64(9), nextXid)
+	assert.Equal(t, uint64(3), epoch)
+
+	// A checkpoint written before epochs ends after next_xid.
+	legacy := make([]byte, 16)
+	binary.LittleEndian.PutUint64(legacy[0:], 512)
+	binary.LittleEndian.PutUint64(legacy[8:], 9)
+	redo, nextXid, epoch, err = ParseCheckpoint(legacy)
+	require.NoError(t, err)
+	assert.Equal(t, LSN(512), redo)
+	assert.Equal(t, uint64(9), nextXid)
+	assert.Equal(t, uint64(0), epoch)
 
 	ts, err := ParseCommit(PayloadCommit(1735689600000000000))
 	require.NoError(t, err)

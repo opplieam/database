@@ -79,15 +79,15 @@ func Restore(c Cluster, backupDir string, target time.Time, mgr *tx.Manager) err
 	defer clog.Close()
 
 	pool := buffer.NewBufferPool(4)
-	nextXid, stopLSN, err := pool.Recover(c.Data, seg, c.Ctl, clog, target)
+	nextXid, epoch, stopLSN, err := pool.Recover(c.Data, seg, c.Ctl, clog, target)
 	if err != nil {
 		return err
 	}
-	// The restored counter comes from replay's return: the record at
-	// REDO is the checkpoint record, whose payload holds the same
-	// counter the label froze, so replay cannot return below the
-	// label's value and needs no separate write for it.
-	mgr.SetNextID(nextXid)
+	// The restored counter pair comes from replay's return: the record at
+	// REDO is the checkpoint record, whose payload holds the same pair the
+	// label froze, so replay cannot return below the label's value and
+	// needs no separate write for it.
+	mgr.Restore(nextXid, epoch)
 
 	// The cut is the rule replay's target cannot finish: the log still
 	// holds commits past the target, and a later recovery without a

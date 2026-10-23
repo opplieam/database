@@ -16,10 +16,12 @@ var errTargetReached = errors.New("buffer: recovery target reached")
 
 // Recover replays the WAL forward from the control file's REDO point,
 // rebuilding pages that died dirty in memory, and returns the next
-// transaction id to hand out and the position replay stopped at: the
-// first commit refused as past the target, or the file's end when
-// nothing was refused. A restore cuts the working log at the stop, so
-// skipped history never gets found by a later recovery without a
+// transaction id and the id epoch to hand out, plus the position replay
+// stopped at: the first commit refused as past the target, or the file's
+// end when nothing was refused. A record that lands behind the checkpoint's
+// floor but later in circular order marks a lap the checkpoint did not
+// record, so replay bumps the epoch there. A restore cuts the working log at
+// the stop, so skipped history never gets found by a later recovery without a
 // target. Single data file: insert payloads carry
 // page ids, not file identity, so every record addresses dataPath (see
 // plan follow-ups). Ends with FlushAll so recovered pages land on disk.
@@ -38,20 +40,34 @@ var errTargetReached = errors.New("buffer: recovery target reached")
 // past it. Later transactions keep their rows on the page but never get
 // their mark, so visibility hides them. The zero time replays everything.
 func (p *BufferPool) Recover(dataPath string, seg *wal.Segment, ctlPath string,
-	clog *tx.CommitLog, target time.Time) (uint64, wal.LSN, error) {
+	clog *tx.CommitLog, target time.Time) (uint64, uint64, wal.LSN, error) {
 	_, redo, err := wal.ReadControl(ctlPath)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
-	var nextXid uint64
+	var nextXid, epoch uint64
 	var stopLSN wal.LSN
 	err = seg.Iterate(redo, func(lsn wal.LSN, rec *wal.Record) error {
-		// A record's Xid is an id already spent, so the counter must clear
-		// it: no id is reused, because a row remembers its writer's id for
-		// life. The checkpoint branch below needs no +1, because that
-		// field stores the next free id instead of a spent one.
-		if rec.Xid > 0 && rec.Xid+1 > nextXid {
-			nextXid = rec.Xid + 1
+		// A record's Xid is an id already spent, so the counter clears it.
+		// Spending MaxUint64 steps over the frozen marker to 1. A record
+		// that lands below the floor but later in circular order means the
+		// log crossed a wrap no checkpoint recorded: bump the epoch and
+		// restart the floor there. A record genuinely below the floor (a
+		// transaction that began before the checkpoint) changes nothing.
+		if rec.Xid > 0 {
+			next := rec.Xid + 1
+			if next == tx.FrozenTxID {
+				next = 1
+			}
+			switch {
+			case nextXid == tx.FrozenTxID:
+				nextXid = next
+			case next > nextXid:
+				nextXid = next
+			case next < nextXid && !tx.Before(next, nextXid):
+				epoch++
+				nextXid = next
+			}
 		}
 		switch rec.Type {
 		case wal.RecordInsert:
@@ -101,24 +117,27 @@ func (p *BufferPool) Recover(dataPath string, seg *wal.Segment, ctlPath string,
 			}
 			return clog.LogCommit(rec.Xid)
 		case wal.RecordCheckpoint:
-			// The record carries the counter as of its own moment, and it
-			// sits exactly at REDO, so replay meets it first. That makes it
-			// the floor when the window holds no commits.
-			_, xid, err := wal.ParseCheckpoint(rec.Payload)
+			// The record carries the counter pair as of its own moment, and
+			// it sits exactly at REDO, so replay meets it first. A higher
+			// epoch wins even when its id is numerically smaller; within
+			// one epoch the higher id is the floor.
+			_, xid, ep, err := wal.ParseCheckpoint(rec.Payload)
 			if err != nil {
 				return fmt.Errorf("buffer: bad checkpoint at LSN %d: %w", lsn, err)
 			}
-			if xid > nextXid {
+			if ep > epoch {
+				epoch, nextXid = ep, xid
+			} else if ep == epoch && xid > nextXid {
 				nextXid = xid
 			}
 		}
 		return nil
 	})
 	if err != nil && !errors.Is(err, errTargetReached) {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	if !errors.Is(err, errTargetReached) {
 		stopLSN = seg.End()
 	}
-	return nextXid, stopLSN, p.FlushAll()
+	return nextXid, epoch, stopLSN, p.FlushAll()
 }

@@ -147,7 +147,7 @@ func (s *ReplicationSuite) TestStandbyFollowsPrimary() {
 	s.T().Logf("Step 2: Base backup")
 	backupDir := "test_repl_follow_backup"
 	defer os.RemoveAll(backupDir)
-	s.Require().NoError(backup.Backup(c, backupDir, pool, seg, s.mgr.NextID()))
+	s.Require().NoError(backup.Backup(c, backupDir, pool, seg, s.mgr.NextID(), s.mgr.Epoch()))
 
 	s.T().Logf("Step 3: Bootstrap copies the backup and replays it to its tip")
 	st := s.newStandby(c, backupDir, "test_repl_follow")
@@ -208,7 +208,7 @@ func (s *ReplicationSuite) TestLagIsDataLoss() {
 	s.insertPooled(ca.Data, poolA, clogA, storage.MovieRecord{MovieId: 2, Title: "Bob", Genres: "Genre"})
 	backupDirA := "test_repl_loss_a_backup"
 	defer os.RemoveAll(backupDirA)
-	s.Require().NoError(backup.Backup(ca, backupDirA, poolA, segA, s.mgr.NextID()))
+	s.Require().NoError(backup.Backup(ca, backupDirA, poolA, segA, s.mgr.NextID(), s.mgr.Epoch()))
 	stA := s.newStandby(ca, backupDirA, "test_repl_loss_a")
 
 	s.T().Logf("Step 2: Carol commits on the primary")
@@ -229,7 +229,7 @@ func (s *ReplicationSuite) TestLagIsDataLoss() {
 	s.insertPooled(cb.Data, poolB, clogB, storage.MovieRecord{MovieId: 2, Title: "Bob", Genres: "Genre"})
 	backupDirB := "test_repl_loss_b_backup"
 	defer os.RemoveAll(backupDirB)
-	s.Require().NoError(backup.Backup(cb, backupDirB, poolB, segB, s.mgr.NextID()))
+	s.Require().NoError(backup.Backup(cb, backupDirB, poolB, segB, s.mgr.NextID(), s.mgr.Epoch()))
 	stB := s.newStandby(cb, backupDirB, "test_repl_loss_b")
 
 	s.T().Logf("Step 5: Carol commits and catch-up runs before the primary dies")

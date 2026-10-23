@@ -83,7 +83,7 @@ func TestBackupSnapshotIsFrozen(t *testing.T) {
 	// checkpoint inside Backup captures the end as REDO and nothing
 	// appends in between.
 	tip := seg.End()
-	require.NoError(t, Backup(c, outDir, pool, seg, mgr.NextID()))
+	require.NoError(t, Backup(c, outDir, pool, seg, mgr.NextID(), mgr.Epoch()))
 	label, err := wal.ReadBackupLabel(filepath.Join(outDir, "backup_label"))
 	require.NoError(t, err)
 	assert.Equal(t, tip, label.RedoLSN)
@@ -129,11 +129,11 @@ func TestBackupRefusesFinishedOutDir(t *testing.T) {
 	c, pool, seg, _, mgr := newCluster(t, dir)
 	outDir := filepath.Join(dir, "backup")
 
-	require.NoError(t, Backup(c, outDir, pool, seg, mgr.NextID()))
+	require.NoError(t, Backup(c, outDir, pool, seg, mgr.NextID(), mgr.Epoch()))
 	want, err := wal.ReadBackupLabel(filepath.Join(outDir, "backup_label"))
 	require.NoError(t, err)
 
-	assert.Error(t, Backup(c, outDir, pool, seg, mgr.NextID()))
+	assert.Error(t, Backup(c, outDir, pool, seg, mgr.NextID(), mgr.Epoch()))
 
 	got, err := wal.ReadBackupLabel(filepath.Join(outDir, "backup_label"))
 	require.NoError(t, err)
@@ -149,7 +149,7 @@ func TestBackupAllowsPartialOutDir(t *testing.T) {
 	require.NoError(t, os.MkdirAll(outDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(outDir, "stale"), []byte("x"), 0644))
 
-	require.NoError(t, Backup(c, outDir, pool, seg, mgr.NextID()))
+	require.NoError(t, Backup(c, outDir, pool, seg, mgr.NextID(), mgr.Epoch()))
 	_, err := wal.ReadBackupLabel(filepath.Join(outDir, "backup_label"))
 	require.NoError(t, err)
 }

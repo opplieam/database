@@ -103,7 +103,7 @@ func (s *BackupSuite) TestPITRToTarget() {
 	s.insertPooled(data, pool, clog, storage.MovieRecord{MovieId: 2, Title: "Bob", Genres: "Genre"})
 
 	s.T().Logf("Step 2: Base backup: checkpoint, archive, copy files, label")
-	s.Require().NoError(backup.Backup(c, backupDir, pool, seg, s.mgr.NextID()))
+	s.Require().NoError(backup.Backup(c, backupDir, pool, seg, s.mgr.NextID(), s.mgr.Epoch()))
 
 	s.T().Logf("Step 3: Carol commits after the backup")
 	s.insertPooled(data, pool, clog, storage.MovieRecord{MovieId: 3, Title: "Carol", Genres: "Genre"})
@@ -145,9 +145,9 @@ func (s *BackupSuite) TestPITRToTarget() {
 	clog2, err := tx.OpenCommitLog(clogPath)
 	s.Require().NoError(err)
 	defer clog2.Close()
-	nextXid, _, err := pool2.Recover(data, seg2, ctl, clog2, time.Time{})
+	nextXid, epoch, _, err := pool2.Recover(data, seg2, ctl, clog2, time.Time{})
 	s.Require().NoError(err)
-	s.mgr.SetNextID(nextXid)
+	s.mgr.Restore(nextXid, epoch)
 	result = s.scanPooled(data, pool2, clog2)
 	s.Require().Equal(3, len(result))
 	s.Equal("Alice", result[0][1])
