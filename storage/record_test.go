@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"math"
 	"os"
 	"testing"
 
@@ -175,6 +176,46 @@ func TestVisibleFrozenRowDeleted(t *testing.T) {
 	clog.LogCommit(2)
 	assert.False(t, rec.Visible(tx.Snapshot{TxID: 3, Cutoff: 3}, clog),
 		"a frozen row deleted before the snapshot is invisible")
+}
+
+func TestVisiblePreviousCycleRow(t *testing.T) {
+	clog := setupClog(t)
+	clog.LogCommit(math.MaxUint64)
+
+	rec := TxRecord{TxMin: math.MaxUint64, TxMax: 0, CID: 0, Data: Tuple{"A"}}
+	snap := tx.Snapshot{TxID: 2, Cutoff: 2} // this pass has issued 1 and 2
+
+	assert.True(t, rec.Visible(snap, clog),
+		"a row from the previous cycle is older than every id in this one")
+}
+
+func TestVisibleRepeatableReadSkipsPostWrapRow(t *testing.T) {
+	clog := setupClog(t)
+	clog.LogCommit(1)
+
+	rec := TxRecord{TxMin: 1, TxMax: 0, CID: 0, Data: Tuple{"A"}}
+	snap := tx.Snapshot{TxID: math.MaxUint64, Cutoff: math.MaxUint64}
+
+	assert.False(t, rec.Visible(snap, clog),
+		"a repeatable-read snapshot from before the wrap must not see post-wrap rows")
+}
+
+func TestReadCommittedSnapshotAfterWrap(t *testing.T) {
+	clog := setupClog(t)
+	mgr := tx.NewManager()
+	mgr.SetNextID(math.MaxUint64)
+
+	old := mgr.Begin(tx.ReadCommitted) // id MaxUint64
+	rec := TxRecord{TxMin: old.ID(), TxMax: 0, CID: 0, Data: Tuple{"A"}}
+	mgr.Commit(old)
+	clog.LogCommit(old.ID())
+
+	reader := mgr.Begin(tx.ReadCommitted) // id 1, counter now 2
+	snap := mgr.Snapshot(reader)
+
+	assert.Equal(t, uint64(2), snap.Cutoff)
+	assert.True(t, rec.Visible(snap, clog),
+		"read committed sees a commit from before the wrap")
 }
 
 func TestInsertTxRecord(t *testing.T) {

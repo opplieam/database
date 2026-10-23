@@ -10,6 +10,32 @@ import "maps"
 // status ages out of the log. It is reserved: Begin never hands it out.
 const FrozenTxID uint64 = 0
 
+// Before reports whether id a comes before id b in the circular id space.
+// Ids run 1..MaxUint64 and wrap back to 1, so a plain < would put every
+// pre-wrap id after every post-wrap id. Comparing the unsigned distance to
+// half the id space keeps the order right while the two ids are within 2^63
+// transactions of each other, the same trade-off PostgreSQL makes with a
+// 2^31 window over 32-bit ids.
+//
+// Example:
+//
+//	Before(MaxUint64, 1) → true
+//	Before(1, MaxUint64) → false
+func Before(a, b uint64) bool {
+	return a != b && b-a < 1<<63
+}
+
+// Age returns the distance from id to now in the circular id space. Unsigned
+// subtraction stays right across the wrap, where now is numerically smaller
+// than id.
+//
+// Example (the counter wrapped from MaxUint64 to 1):
+//
+//	Age(MaxUint64, 1) → 2
+func Age(from, now uint64) uint64 {
+	return now - from
+}
+
 // Status is where a transaction stands in its lifecycle. Status changes once:
 // a transaction starts active and ends committed or aborted.
 type Status int
@@ -129,6 +155,7 @@ func (t *Transaction) rollback() {
 //	mgr.IsActive(2) → true
 type Manager struct {
 	nextID uint64
+	epoch  uint64
 	active map[uint64]*Transaction
 }
 
@@ -140,20 +167,31 @@ func NewManager() *Manager {
 	}
 }
 
-// Begin allocates the next id, records the transactions currently in flight as
-// this transaction's snapshot, and adds the new transaction to the active set.
-// Finish it with Commit or Rollback.
+// Begin allocates the next id, never the reserved 0, records the transactions
+// currently in flight as this transaction's snapshot, and adds the new
+// transaction to the active set. Finish it with Commit or Rollback. Spending
+// MaxUint64 advances the epoch before returning, so the next id is 1 of the
+// new pass and no checkpoint ever stores 0.
 func (m *Manager) Begin(isolationLevel Isolation) *Transaction {
-	tx := newTransaction(m.nextID, isolationLevel)
+	id := m.nextID
+
+	tx := newTransaction(id, isolationLevel)
 
 	// Capture in-progress transactions at snapshot time
 	tx.xipList = make(map[uint64]bool)
-	for id := range m.active {
-		tx.xipList[id] = true
+	for activeID := range m.active {
+		tx.xipList[activeID] = true
 	}
 
-	m.active[m.nextID] = tx
-	m.nextID++
+	m.active[id] = tx
+	m.nextID = id + 1
+	if m.nextID == FrozenTxID {
+		// MaxUint64 is spent. Step straight over the frozen marker on this
+		// call, so NextID is always checkpointable and the epoch already
+		// names the pass the next id belongs to.
+		m.nextID = 1
+		m.epoch++
+	}
 	return tx
 }
 
@@ -193,11 +231,35 @@ func (m *Manager) Commit(tx *Transaction) {
 // it. Checkpoint saves it so recovery restores the counter past reuse.
 func (m *Manager) NextID() uint64 { return m.nextID }
 
-// SetNextID moves the counter forward after recovery, so ids the log
-// already spent are never handed out a second time. A lower value is
-// ignored: rewinding would reuse ids that living rows still carry.
+// Epoch returns how many times the id counter has gone around. It rises when
+// recovery adopts a checkpoint from a later pass.
+func (m *Manager) Epoch() uint64 { return m.epoch }
+
+// SetNextID moves the counter forward inside the current epoch.
 func (m *Manager) SetNextID(next uint64) {
-	if next > m.nextID {
+	m.advance(next, m.epoch)
+}
+
+// Restore adopts a counter pair from recovery. A higher epoch wins even when
+// its id is numerically lower, which is what a wrap produces. Within one
+// epoch only a higher id moves the counter, so a stale pre-wrap checkpoint
+// cannot rewind it.
+func (m *Manager) Restore(next, epoch uint64) {
+	m.advance(next, epoch)
+}
+
+// advance is the one place that compares counter pairs. 0 is the frozen
+// marker, never a counter value, so it is ignored.
+func (m *Manager) advance(next, epoch uint64) {
+	if next == FrozenTxID {
+		return
+	}
+	if epoch > m.epoch {
+		m.epoch = epoch
+		m.nextID = next
+		return
+	}
+	if epoch == m.epoch && next > m.nextID {
 		m.nextID = next
 	}
 }

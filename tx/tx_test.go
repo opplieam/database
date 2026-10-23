@@ -1,6 +1,7 @@
 package tx
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -133,4 +134,70 @@ func TestSetNextIDOnlyMovesForward(t *testing.T) {
 
 	// And the next Begin hands out the restored value.
 	assert.Equal(t, uint64(50), mgr.Begin(RepeatableRead).ID())
+}
+
+func TestRestoreAcceptsNewEpoch(t *testing.T) {
+	mgr := NewManager()
+	mgr.SetNextID(10)
+
+	// A post-wrap checkpoint has a smaller id but a higher epoch.
+	mgr.Restore(1, 1)
+	assert.Equal(t, uint64(1), mgr.Epoch())
+	assert.Equal(t, uint64(1), mgr.NextID())
+
+	// A stale pre-wrap checkpoint must not rewind either field.
+	mgr.Restore(math.MaxUint64, 0)
+	assert.Equal(t, uint64(1), mgr.Epoch())
+	assert.Equal(t, uint64(1), mgr.NextID())
+
+	// Within the same epoch, only a higher id moves the counter.
+	mgr.Restore(5, 1)
+	assert.Equal(t, uint64(5), mgr.NextID())
+	mgr.Restore(3, 1)
+	assert.Equal(t, uint64(5), mgr.NextID())
+
+	// The frozen marker is never a counter value.
+	mgr.Restore(0, 2)
+	assert.Equal(t, uint64(1), mgr.Epoch())
+	assert.Equal(t, uint64(5), mgr.NextID())
+}
+
+func TestBeginSkipsFrozenID(t *testing.T) {
+	mgr := NewManager()
+	mgr.SetNextID(math.MaxUint64)
+
+	last := mgr.Begin(RepeatableRead)
+	assert.Equal(t, uint64(math.MaxUint64), last.ID())
+
+	first := mgr.Begin(RepeatableRead)
+	assert.Equal(t, uint64(1), first.ID(), "the id clock must step over the frozen marker")
+}
+
+func TestBeginWrapAdvancesEpoch(t *testing.T) {
+	mgr := NewManager()
+	mgr.SetNextID(math.MaxUint64)
+
+	last := mgr.Begin(RepeatableRead)
+	assert.Equal(t, uint64(math.MaxUint64), last.ID())
+	assert.Equal(t, uint64(1), mgr.NextID(), "no id 0 gap to checkpoint")
+	assert.Equal(t, uint64(1), mgr.Epoch())
+
+	first := mgr.Begin(RepeatableRead)
+	assert.Equal(t, uint64(1), first.ID())
+	assert.Equal(t, uint64(2), mgr.NextID())
+	assert.Equal(t, uint64(1), mgr.Epoch())
+}
+
+func TestBefore(t *testing.T) {
+	assert.True(t, Before(1, 2))
+	assert.False(t, Before(2, 1))
+	assert.False(t, Before(5, 5))
+	assert.True(t, Before(math.MaxUint64, 1), "the wrap makes MaxUint64 older than 1")
+	assert.False(t, Before(1, math.MaxUint64))
+}
+
+func TestAge(t *testing.T) {
+	assert.Equal(t, uint64(1), Age(1, 2))
+	assert.Equal(t, uint64(0), Age(7, 7))
+	assert.Equal(t, uint64(2), Age(math.MaxUint64, 1), "MaxUint64 → 0 → 1")
 }

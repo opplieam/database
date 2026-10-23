@@ -274,10 +274,16 @@ func DecodeTxRecord(buf []byte) (TxRecord, error) {
 //   - The creator committed after my snapshot
 //   - It was deleted before my snapshot
 //
+// "Before" is circular: ids wrap from MaxUint64 back to 1, so a creator of
+// MaxUint64 is older than a post-wrap cutoff of 2. Comparisons use tx.Before.
+//
 // Examples:
 //
 //	TxRecord{TxMin: 0, TxMax: 0}, clog has no entry for 0
 //	  Visible(tx.Snapshot{TxID: 5, Cutoff: 5}, clog) → true   (frozen)
+//
+//	TxRecord{TxMin: MaxUint64, TxMax: 0}, clog has MaxUint64 committed
+//	  Visible(tx.Snapshot{TxID: 2, Cutoff: 2}, clog) → true   (previous cycle)
 //
 //	TxRecord{TxMin: 1, TxMax: 0}, clog has tx=1 committed
 //	  Visible(tx.Snapshot{TxID: 1, Cutoff: 1}, clog) → true   (my own change)
@@ -304,8 +310,8 @@ func (r TxRecord) Visible(snap tx.Snapshot, clog *tx.CommitLog) bool {
 			return false
 		}
 
-		// Was the record created at or after my snapshot?
-		if r.TxMin >= snap.Cutoff {
+		// Was the record created before my snapshot?
+		if !tx.Before(r.TxMin, snap.Cutoff) {
 			return false
 		}
 	}
@@ -321,7 +327,7 @@ func (r TxRecord) Visible(snap tx.Snapshot, clog *tx.CommitLog) bool {
 	}
 
 	// Was the delete at or after my snapshot?
-	if r.TxMax >= snap.Cutoff {
+	if !tx.Before(r.TxMax, snap.Cutoff) {
 		return true
 	}
 
