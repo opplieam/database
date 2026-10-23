@@ -90,6 +90,23 @@ func TestCommitLogTornTail(t *testing.T) {
 	assert.True(t, clog2.IsAborted(2))
 }
 
+func TestCommitLogRejectsUnknownStatus(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "clog")
+
+	// Tx 1 commits normally, then tx 7 carries status 9: a full record,
+	// but not a value any writer emits.
+	require.NoError(t, os.WriteFile(path, []byte{
+		1, 0, 0, 0, 0, 0, 0, 0, 1,
+		7, 0, 0, 0, 0, 0, 0, 0, 9,
+	}, 0644))
+
+	_, err := OpenCommitLog(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "byte 9")
+	assert.Contains(t, err.Error(), "transaction 7")
+	assert.Contains(t, err.Error(), "unknown status 9")
+}
+
 func TestCommitLogOverwrite(t *testing.T) {
 	clogFile := "test_clog_overwrite.data"
 	defer os.Remove(clogFile)

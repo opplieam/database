@@ -216,11 +216,15 @@ func (cl *CommitLog) append(txID uint64, status clogStatus) error {
 //
 // A record cut short by a crash is dropped and truncated: it never finished
 // its durable write, so it cannot represent a committed transaction.
+//
+// A complete record with a status outside the four defined values is
+// corruption; load fails instead of guessing an outcome.
 func (cl *CommitLog) load() error {
 	if _, err := cl.file.Seek(0, io.SeekStart); err != nil {
 		return fmt.Errorf("tx: seek commit log start: %w", err)
 	}
 
+	offset := int64(0)
 	for {
 		recBuf := make([]byte, clogRecordSize)
 		n, err := io.ReadFull(cl.file, recBuf)
@@ -236,7 +240,15 @@ func (cl *CommitLog) load() error {
 		}
 
 		txID := binary.LittleEndian.Uint64(recBuf[:8])
-		cl.records[txID] = clogStatus(recBuf[8])
+		status := clogStatus(recBuf[8])
+		switch status {
+		case clogStatusUnknown, clogStatusCommitted, clogStatusAborted, clogStatusInProgress:
+			cl.records[txID] = status
+		default:
+			return fmt.Errorf("record at byte %d: transaction %d has unknown status %d",
+				offset, txID, status)
+		}
+		offset += int64(clogRecordSize)
 	}
 }
 
