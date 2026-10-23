@@ -1,7 +1,9 @@
 package tx
 
 import (
+	"math"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -104,4 +106,55 @@ func TestCommitLogOverwrite(t *testing.T) {
 	require.NoError(t, clog.LogAbort(1))
 	assert.False(t, clog.IsCommitted(1))
 	assert.True(t, clog.IsAborted(1))
+}
+
+func TestCommitLogPurge(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "clog")
+	cl, err := OpenCommitLog(path)
+	require.NoError(t, err)
+
+	for _, id := range []uint64{1, 5, 100} {
+		require.NoError(t, cl.LogCommit(id))
+	}
+
+	removed, err := cl.Purge(100, 10)
+	require.NoError(t, err)
+	assert.Equal(t, 2, removed)
+	assert.False(t, cl.IsCommitted(1))
+	assert.False(t, cl.IsCommitted(5))
+	assert.True(t, cl.IsCommitted(100))
+
+	// Appends land after the rewrite and survive a reopen.
+	require.NoError(t, cl.LogCommit(101))
+	require.NoError(t, cl.Close())
+
+	cl2, err := OpenCommitLog(path)
+	require.NoError(t, err)
+	defer cl2.Close()
+	assert.True(t, cl2.IsCommitted(100))
+	assert.True(t, cl2.IsCommitted(101))
+	assert.False(t, cl2.IsCommitted(5))
+}
+
+// Just before the wrap, the old epoch's head is ancient and goes, while its
+// recent tail stays. Reusing id 1 in the new epoch must not inherit the old
+// commit mark.
+func TestCommitLogPurgeAcrossWrap(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "clog")
+	cl, err := OpenCommitLog(path)
+	require.NoError(t, err)
+	defer cl.Close()
+
+	require.NoError(t, cl.LogCommit(1))
+	require.NoError(t, cl.LogCommit(math.MaxUint64-5))
+
+	removed, err := cl.Purge(math.MaxUint64, 10)
+	require.NoError(t, err)
+	assert.Equal(t, 1, removed)
+	assert.False(t, cl.IsCommitted(1), "old id 1 must not survive into the next pass")
+	assert.True(t, cl.IsCommitted(math.MaxUint64-5), "recent tail stays")
+
+	// The first id the new epoch hands out is clean.
+	require.NoError(t, cl.LogCommit(1))
+	assert.True(t, cl.IsCommitted(1))
 }

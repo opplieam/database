@@ -187,6 +187,9 @@ func (s *VacuumSuite) TestVacuumNoIndex() {
 	s.T().Logf("  - Index entries removed: %d (expected 0, no index)", stats.IndexEntries)
 	s.Equal(2, stats.DeadTuples)
 	s.Equal(0, stats.IndexEntries)
+	s.Equal(1, stats.PurgedRecords)
+	s.False(s.clog.IsCommitted(3), "old deleter mark is dropped")
+	s.True(s.clog.IsCommitted(5), "mark inside the freeze window stays")
 
 	s.T().Logf("=== VACUUM without Index Complete ===")
 }

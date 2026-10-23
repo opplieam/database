@@ -74,6 +74,7 @@ type VacuumStats struct {
 	FrozenTuples  int  // Number of tuples frozen
 	IndexEntries  int  // Number of index entries removed
 	PagesModified int  // Number of pages modified
+	PurgedRecords int  // Commit-log marks dropped after freezing
 }
 
 // ScanHeap scans a heap file to find dead tuples and tuples to freeze.
@@ -90,7 +91,7 @@ type VacuumStats struct {
 // Example:
 //   currentTxID = 150000000
 //   freezeMaxAge = 100000000 (100M)
-//   Tuples with TxMin < 50M will be frozen
+//   Tuples more than 100M transactions behind currentTxID are frozen
 func ScanHeap(filename string, clog *tx.CommitLog, xipList map[uint64]bool, currentTxID uint64, freezeMaxAge uint64) (*ScanResult, error) {
 	file, err := storage.Open(filename)
 	if err != nil {
@@ -171,44 +172,25 @@ func isDead(txRecord storage.TxRecord, clog *tx.CommitLog, xipList map[uint64]bo
 	return true
 }
 
-// shouldFreeze checks if a tuple should be frozen.
+// shouldFreeze reports whether a live tuple has fallen more than freezeMaxAge
+// transactions behind the clock.
 //
-// A tuple should be frozen if its TxMin is "old" (older than freezeMaxAge).
-// This prevents transaction ID wraparound.
+// Age comes from tx.Age, so the decision stays right across the wrap, where
+// subtracting a cutoff from currentTxID used to flip direction. A tuple
+// exactly freezeMaxAge behind is kept, matching the old strict cutoff.
 //
-// How wraparound works:
-//   - TxIDs are unsigned integers that circle back to 0
-//   - Without freeze, old tuples become invisible after wraparound
-//   - Freeze sets TxMin to tx.FrozenTxID (0), making them always visible
-//   - 0 is reserved for that marker, so no real transaction uses it
+// Already-frozen tuples are skipped: 0 is the marker, not an old transaction.
 //
-// The logic:
-//   cutoff = currentTxID - freezeMaxAge
-//   If cutoff > currentTxID, wraparound happened
-//   Freeze if: TxMin is NOT in the new zone
+// Example:
 //
-// Example with small numbers (max=10, freezeMaxAge=3, currentTxID=2):
-//   cutoff = 2 - 3 = -1 → wraps to 18446744073709551615
-//   New zone (keep): {1, 2} (recent transactions; 0 is the frozen marker)
-//   Old zone (freeze): {3, 4, 5, 6, 7, 8, 9} (older than 3 transactions)
+//	currentTxID = 150000000
+//	freezeMaxAge = 100000000 (100M)
+//	Tuples more than 100M transactions behind currentTxID are frozen
 func shouldFreeze(txMin uint64, currentTxID uint64, freezeMaxAge uint64) bool {
 	if txMin == tx.FrozenTxID {
-		return false // already frozen; never assign it twice
+		return false
 	}
-
-	cutoff := currentTxID - freezeMaxAge
-
-	// Check if wraparound happened
-	// If cutoff > currentTxID, we wrapped around
-	if cutoff > currentTxID {
-		// Wraparound: new zone is {0, 1, ..., currentTxID}
-		// Freeze if txMin > currentTxID (old transaction)
-		return txMin > currentTxID
-	}
-
-	// Normal case: new zone is {cutoff, ..., currentTxID}
-	// Freeze if txMin < cutoff (too old)
-	return txMin < cutoff
+	return tx.Age(txMin, currentTxID) > freezeMaxAge
 }
 
 // ApplyFreezes updates TxMin for frozen tuples.
@@ -236,8 +218,8 @@ func ApplyFreezes(filename string, frozenTuples []FrozenTuple) error {
 
 		for _, slotId := range slotIds {
 			if err := page.FreezeTuple(int(slotId), tx.FrozenTxID); err != nil {
-				// If freeze fails, skip this tuple
-				continue
+				return fmt.Errorf("vacuum: freeze page %d slot %d: %w",
+					pageId, slotId, err)
 			}
 		}
 
@@ -403,6 +385,7 @@ func updateFSM(filename string, deadTIDs []storage.TID, fsmPath string) error {
 //   2. ApplyFreezes - update old tuples to prevent wraparound
 //   3. VacuumIndexes - remove orphaned index entries
 //   4. VacuumHeap - mark dead tuples and update FSM
+//   5. Purge - drop commit marks older than the freeze window
 //
 // Parameters:
 //   - filename: path to heap file
@@ -445,6 +428,15 @@ func Vacuum(filename string, clog *tx.CommitLog, bt *btree.BTree,
 			return nil, err
 		}
 	}
+
+	// Phase 4: Purge the commit log. Only now: purge may drop a mark whose
+	// row the freeze pass failed to cover, so a freeze error above must
+	// return before this runs.
+	removed, err := clog.Purge(currentTxID, freezeMaxAge)
+	if err != nil {
+		return nil, err
+	}
+	stats.PurgedRecords = removed
 
 	return stats, nil
 }

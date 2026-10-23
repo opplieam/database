@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 )
 
 // clogRecordSize is the fixed width of one on-disk entry: an 8-byte
@@ -46,6 +47,7 @@ const (
 // TODO: buffer writes and flush on a timer; today every record is written and
 // fsynced immediately, which is the durability choice, not an accident.
 type CommitLog struct {
+	path    string
 	file    *os.File
 	records map[uint64]clogStatus // status by transaction id; rebuilt by load
 }
@@ -59,6 +61,7 @@ func OpenCommitLog(path string) (*CommitLog, error) {
 	}
 
 	cl := &CommitLog{
+		path:    path,
 		file:    f,
 		records: make(map[uint64]clogStatus),
 	}
@@ -108,6 +111,77 @@ func (cl *CommitLog) IsInProgress(txID uint64) bool {
 // Close closes the log file. Reopen the same path to replay it.
 func (cl *CommitLog) Close() error {
 	return cl.file.Close()
+}
+
+// Purge drops marks for transactions more than maxAge behind currentTxID,
+// rewrites the log without them, and returns how many went. Age is circular,
+// so the rule still holds across the wrap: ids in the old epoch's head read
+// as ancient and go, while its recent tail stays until it too ages out.
+//
+// Call it only after a successful freeze pass. A mark inside the freeze
+// window can still belong to a live row; an older one cannot.
+//
+// The rewrite is tmp plus rename, and the rename is the commit point: a
+// crash before it leaves the old log in place.
+func (cl *CommitLog) Purge(currentTxID, maxAge uint64) (int, error) {
+	kept := make(map[uint64]clogStatus, len(cl.records))
+	ids := make([]uint64, 0, len(cl.records))
+	for id, status := range cl.records {
+		if Age(id, currentTxID) <= maxAge {
+			kept[id] = status
+			ids = append(ids, id)
+		}
+	}
+	removed := len(cl.records) - len(ids)
+	if removed == 0 {
+		return 0, nil
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+	tmp := cl.path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return 0, fmt.Errorf("tx: create purged commit log: %w", err)
+	}
+	tmpDone := false
+	defer func() {
+		if !tmpDone {
+			f.Close()
+			os.Remove(tmp)
+		}
+	}()
+
+	buf := make([]byte, clogRecordSize)
+	for _, id := range ids {
+		binary.LittleEndian.PutUint64(buf[:8], id)
+		buf[8] = byte(kept[id])
+		if _, err := f.Write(buf); err != nil {
+			return 0, fmt.Errorf("tx: write purged commit log: %w", err)
+		}
+	}
+	if err := f.Sync(); err != nil {
+		return 0, fmt.Errorf("tx: sync purged commit log: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return 0, fmt.Errorf("tx: close purged commit log: %w", err)
+	}
+	tmpDone = true
+
+	if err := os.Rename(tmp, cl.path); err != nil {
+		os.Remove(tmp)
+		return 0, fmt.Errorf("tx: replace commit log: %w", err)
+	}
+
+	// Reopen before swapping the map, so a failed reopen leaves the old
+	// in-memory view intact.
+	nf, err := os.OpenFile(cl.path, os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		return 0, fmt.Errorf("tx: reopen purged commit log: %w", err)
+	}
+	cl.file.Close()
+	cl.file = nf
+	cl.records = kept
+	return removed, nil
 }
 
 // append writes one record at the end of the file and syncs it. Write-through

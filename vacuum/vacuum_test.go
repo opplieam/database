@@ -1,7 +1,9 @@
 package vacuum
 
 import (
+	"math"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"database/storage"
@@ -208,6 +210,20 @@ func TestShouldFreeze(t *testing.T) {
 			currentTxID:  2,
 			freezeMaxAge: 3,
 			expected:     true,
+		},
+		{
+			name:         "Wraparound_MaxIDRecent",
+			txMin:        math.MaxUint64,
+			currentTxID:  5,
+			freezeMaxAge: 10,
+			expected:     false, // only 6 behind, window is 10
+		},
+		{
+			name:         "Wraparound_MaxIDOld",
+			txMin:        math.MaxUint64,
+			currentTxID:  5,
+			freezeMaxAge: 3,
+			expected:     true, // 6 behind, window is 3
 		},
 
 		// Edge cases
@@ -874,4 +890,18 @@ func TestVacuumHeap(t *testing.T) {
 			os.Remove(fsmFile)
 		})
 	}
+}
+
+// A freeze target that cannot be written must fail the pass, not be skipped:
+// purge may only run after every freeze succeeded.
+func TestApplyFreezesReportsFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "heap")
+	createTestHeapFile(t, path, []storage.TxRecord{
+		{TxMin: 1, Data: storage.Tuple{"A"}},
+	})
+
+	err := ApplyFreezes(path, []FrozenTuple{
+		{TID: storage.TID{PageId: 0, SlotId: 7}},
+	})
+	require.Error(t, err)
 }
