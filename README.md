@@ -203,9 +203,10 @@ This database needs maintenance, because nothing overwrites here. Every
 update inserts a brand-new version and stamps the old one deleted, so dead
 rows accumulate and scans slow down stepping over them. VACUUM walks the
 heap on demand and finds what no transaction can still see. It hands the
-space back to the free-space map, freezes ancient transaction ids so the
-counter never wraps, and removes index entries pointing at dead rows. No
-daemon exists yet. Someone runs it by hand.
+space back to the free-space map, freezes ancient transaction ids so their
+rows stay visible once their commit marks age out, removes index entries
+pointing at dead rows, and purges commit marks older than the freeze
+window. No daemon exists yet. Someone runs it by hand.
 
 **Read:** [Ch 6](https://www.interdb.jp/pg/pgsql06.html)
 
@@ -214,7 +215,10 @@ daemon exists yet. Someone runs it by hand.
 **Tested:** dead detection (TestIsDead, TestScanHeap), freezing
 (TestShouldFreeze, TestApplyFreezes), index and heap cleanup
 (TestVacuumIndexes, TestVacuumHeap, TestFullVacuumFlow), and cost tracking
-on real pool counters (TestCostReporterThrottles).
+on real pool counters (TestCostReporterThrottles), and commit-log purging
+only after a complete freeze pass (TestCommitLogPurge,
+TestCommitLogPurgeAcrossWrap, TestApplyFreezesReportsFailure,
+TestVacuumSuite).
 
 **Limits:** no VACUUM FULL, no visibility map, no autovacuum daemon. Costs
 accrue through Sync, but VACUUM still reads around the pool instead of
@@ -267,11 +271,12 @@ seg, _ := wal.Open("movies.wal")
 pool := buffer.NewBufferPool(4)
 pool.SetWAL(seg)
 // ... pooled inserts, flushes ...
-wal.Checkpoint(pool, seg, "movies.ctl", mgr.NextID())
+wal.Checkpoint(pool, seg, "movies.ctl", mgr.NextID(), mgr.Epoch())
 // ... crash: drop the pool, reopen the log ...
 pool2 := buffer.NewBufferPool(4)
-nextXid, _ := pool2.Recover("movies.data", seg2, "movies.ctl", clog)
-mgr.SetNextID(nextXid)
+nextXid, epoch, _, _ := pool2.Recover("movies.data", seg2, "movies.ctl",
+    clog, time.Time{})
+mgr.Restore(nextXid, epoch)
 ```
 
 **Read:** [Ch 9](https://www.interdb.jp/pg/pgsql09.html)
@@ -282,7 +287,10 @@ mgr.SetNextID(nextXid)
 (TestPoolInsertCommitsToWAL). Replay applies only newer records, skips
 flushed ones without duplicating (TestFlushedRecordSkipped,
 TestRecoverReplaysUnflushedRow). Checkpoints bound replay to the tail
-(TestCrashRecovery).
+(TestCrashRecovery). A higher epoch wins over a larger id, and replay
+detects a wrap that no checkpoint recorded (TestRecoverPrefersHigherEpoch,
+TestRecoverDetectsWrapWithoutCheckpoint,
+TestRecoverIgnoresIDsBelowCheckpoint).
 
 **Limits:** one data file per recovery (payloads carry no file id). No
 abort records: aborted inserts would leave invisible orphans VACUUM must
@@ -314,7 +322,8 @@ c := backup.Cluster{
     Data: "m.data", Clog: "m.clog", Ctl: "m.ctl",
     WAL: "m.wal", Archives: "archive",
 }
-backup.Backup(c, "backup", pool, seg, mgr.NextID()) // checkpoint, archive, copy, label
+backup.Backup(c, "backup", pool, seg,
+    mgr.NextID(), mgr.Epoch()) // checkpoint, archive, copy, label
 // ... the world moves on, then a mistake after the target ...
 backup.Restore(c, "backup", target, mgr)            // files back, replay to target, cut the log, flush
 ```
@@ -416,11 +425,14 @@ database/
 
 ### Concurrency ([Ch 5](https://www.interdb.jp/pg/pgsql05.html))
 - [x] MVCC (TxMin/TxMax/CID, clog, snapshots, xip_list, both isolation levels)
+- [x] Transaction id wraparound (reserved 0, circular order, epoch-aware
+  checkpoints, freeze plus commit-log purge)
 - [ ] Write-side concurrency (needs UPDATE/DELETE executors first; then lost-update prevention per [5.8](https://www.interdb.jp/pg/pgsql05/08.html), SELECT FOR UPDATE row locks; SSI, serializable snapshot isolation, dropped as out of scope)
 
 ### VACUUM ([Ch 6](https://www.interdb.jp/pg/pgsql06.html))
 - [x] Dead tuple detection, freeze processing, index and heap vacuuming
 - [x] Cost tracker and reporter (standalone; fires on real pool activity)
+- [x] Commit-log purge after a successful freeze pass
 - [ ] Throttled VACUUM integration (needs VACUUM reading through the pool)
 
 ### Buffer manager ([Ch 8](https://www.interdb.jp/pg/pgsql08.html))
@@ -434,6 +446,7 @@ database/
 
 ### WAL ([Ch 9](https://www.interdb.jp/pg/pgsql09.html))
 - [x] Write-Ahead Logging (LSN-stamped pages, commit ordering, checkpoints, replay)
+- [x] Epoch-aware checkpoints and replay detection of an unrecorded wrap
 - [ ] Full-page writes (first-change-per-checkpoint page images, torn-write recovery)
 - [ ] Multi-file recovery (needs file id in insert payloads)
 - [ ] Segment rollover and recycling (one full-copy archive per backup today; rollover replaces it)
