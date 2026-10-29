@@ -2,12 +2,15 @@ package executors
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"database/storage"
+	"database/tx"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHeapFileScan(t *testing.T) {
@@ -53,4 +56,47 @@ func TestHeapFileScan(t *testing.T) {
 	result2, err := Run(q2)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(result2), "should find 2 Comedy movies")
+}
+
+func TestHeapFileScanMVCCSkipsInvisibleWithoutSkippingPage(t *testing.T) {
+	dir := t.TempDir()
+	filename := filepath.Join(dir, "heap_scan_mvcc.data")
+	clog, err := tx.OpenCommitLog(filepath.Join(dir, "heap_scan_mvcc.clog"))
+	require.NoError(t, err)
+	defer clog.Close()
+
+	mgr := tx.NewManager()
+
+	// First record: rollback leaves it invisible.
+	tx1 := mgr.Begin(tx.RepeatableRead)
+	ctx1 := &TransactionContext{Tx: tx1, Clog: clog, Snapshot: mgr.Snapshot(tx1)}
+	first := encodeMVCCInsert(ctx1, storage.Tuple{uint32(1), "Invisible", "Action"})
+	require.NoError(t, storage.InsertRecord(filename, first, 0))
+	mgr.Rollback(tx1)
+
+	// Second record: commit makes it visible.
+	tx2 := mgr.Begin(tx.RepeatableRead)
+	ctx2 := &TransactionContext{Tx: tx2, Clog: clog, Snapshot: mgr.Snapshot(tx2)}
+	second := encodeMVCCInsert(ctx2, storage.Tuple{uint32(2), "Visible", "Comedy"})
+	require.NoError(t, storage.InsertRecord(filename, second, 0))
+	require.NoError(t, clog.LogCommit(tx2.ID()))
+	mgr.Commit(tx2)
+
+	// Both records must share page 0; otherwise this test proves nothing
+	// about skipping within a page.
+	f, err := storage.Open(filename)
+	require.NoError(t, err)
+	require.Equal(t, uint32(1), f.PageCount())
+	require.NoError(t, f.Close())
+
+	tx3 := mgr.Begin(tx.RepeatableRead)
+	ctx3 := &TransactionContext{Tx: tx3, Clog: clog, Snapshot: mgr.Snapshot(tx3)}
+	scan, err := NewHeapFileScan(filename, ctx3)
+	require.NoError(t, err)
+	defer scan.Close()
+
+	result, err := Run(scan)
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	assert.Equal(t, "Visible", result[0][1])
 }

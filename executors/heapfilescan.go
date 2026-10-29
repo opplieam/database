@@ -112,7 +112,8 @@ func (h *HeapFileScan) Next() (storage.Tuple, error) {
 				if visible {
 					return tuple, nil
 				}
-				// skip invisible record
+				// skip only this record; keep scanning the same page
+				continue
 			} else {
 				// Legacy mode: decode raw MovieRecord
 				id, title, genres, err := storage.DecodeMovieRecord(recordBytes)
