@@ -9,7 +9,7 @@ import (
 )
 
 func TestSelection(t *testing.T) {
-	scan := NewMemoryScan(testBirds, nil)
+	scan := NewMemoryScan(testBirds)
 	filtered := NewSelection(scan, func(t storage.Tuple) bool {
 		return !t[3].(bool) // non-US birds
 	})

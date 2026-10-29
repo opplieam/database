@@ -7,7 +7,7 @@ import (
 )
 
 // MemoryScan iterates over an in-memory table (slice of tuples).
-// Used for testing before we add disk-based scans.
+// Used by the operator tests.
 //
 // Example state transitions for a table with 3 rows:
 //
@@ -37,14 +37,13 @@ import (
 //   idx=3 < len=3 → false
 //   return nil, io.EOF
 type MemoryScan struct {
-	table   []storage.Tuple
-	xipList map[uint64]bool
-	idx     int
+	table []storage.Tuple
+	idx   int
 }
 
 // NewMemoryScan creates a new MemoryScan executor node.
-func NewMemoryScan(table []storage.Tuple, xipList map[uint64]bool) *MemoryScan {
-	return &MemoryScan{table: table, xipList: xipList}
+func NewMemoryScan(table []storage.Tuple) *MemoryScan {
+	return &MemoryScan{table: table}
 }
 
 // Next returns the next tuple from the in-memory table, or io.EOF when exhausted.

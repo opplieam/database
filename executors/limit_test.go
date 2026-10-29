@@ -7,7 +7,7 @@ import (
 )
 
 func TestLimit(t *testing.T) {
-	scan := NewMemoryScan(testBirds, nil)
+	scan := NewMemoryScan(testBirds)
 	limited := NewLimit(scan, 3)
 
 	result, err := Run(limited)
