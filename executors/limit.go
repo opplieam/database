@@ -11,25 +11,29 @@ import (
 // Example: Limit 2
 //
 // Initial state:
-//   l.child = MemoryScan([{"A"}, {"B"}, {"C"}])
-//   l.n = 2
-//   l.count = 0
+//
+//	l.child = MemoryScan([{"A"}, {"B"}, {"C"}])
+//	l.n = 2
+//	l.count = 0
 //
 // Call 1: Next()
-//   count=0 < n=2 → true
-//   t = child.Next() = {"A"}
-//   count becomes 1
-//   return {"A"}
+//
+//	count=0 < n=2 → true
+//	t = child.Next() = {"A"}
+//	count becomes 1
+//	return {"A"}
 //
 // Call 2: Next()
-//   count=1 < n=2 → true
-//   t = child.Next() = {"B"}
-//   count becomes 2
-//   return {"B"}
+//
+//	count=1 < n=2 → true
+//	t = child.Next() = {"B"}
+//	count becomes 2
+//	return {"B"}
 //
 // Call 3: Next()
-//   count=2 < n=2 → false
-//   return nil, io.EOF
+//
+//	count=2 < n=2 → false
+//	return nil, io.EOF
 //
 // Note: Even though child has "C", we stop at n=2.
 type Limit struct {

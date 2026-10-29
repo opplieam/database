@@ -10,18 +10,21 @@ import (
 // Example: Pick only name and weight from bird records
 //
 // Initial state:
-//   p.child = MemoryScan([{"robin", "American Robin", 0.077, true}, ...])
-//   p.proj = func(t) { return Tuple{t[0], t[2]} }  // pick id, weight
+//
+//	p.child = MemoryScan([{"robin", "American Robin", 0.077, true}, ...])
+//	p.proj = func(t) { return Tuple{t[0], t[2]} }  // pick id, weight
 //
 // Call 1: Next()
-//   t = child.Next() = {"robin", "American Robin", 0.077, true}
-//   proj(t) = {"robin", 0.077}
-//   return {"robin", 0.077}
+//
+//	t = child.Next() = {"robin", "American Robin", 0.077, true}
+//	proj(t) = {"robin", 0.077}
+//	return {"robin", 0.077}
 //
 // Call 2: Next()
-//   t = child.Next() = {"eagle", "Bald Eagle", 4.74, true}
-//   proj(t) = {"eagle", 4.74}
-//   return {"eagle", 4.74}
+//
+//	t = child.Next() = {"eagle", "Bald Eagle", 4.74, true}
+//	proj(t) = {"eagle", 4.74}
+//	return {"eagle", 4.74}
 //
 // The projection function runs once per tuple. It can:
 //   - Pick columns: func(t) { return Tuple{t[0], t[1]} }

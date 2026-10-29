@@ -1,8 +1,8 @@
 package executors
 
 import (
-	"io"
 	"database/storage"
+	"io"
 )
 
 // Insert is an executor node that inserts one record into a binary file.
