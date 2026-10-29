@@ -2,9 +2,11 @@ package storage
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFileCreate(t *testing.T) {
@@ -146,4 +148,28 @@ func TestInsertRecord(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 3, len(movies3))
 	assert.Equal(t, "", movies3[2].Title, "NULL title should be empty")
+}
+
+func TestInsertRecordRejectsUnfitRecord(t *testing.T) {
+	// An empty page has 4080 bytes free. The FSM check sees this 4076-byte
+	// record as fitting, but AddRecord also needs 5 bytes of page metadata.
+	const recordLen = 4076
+
+	t.Run("existing file", func(t *testing.T) {
+		filename := filepath.Join(t.TempDir(), "unfit_existing.data")
+		file, err := Create(filename)
+		require.NoError(t, err)
+		require.NoError(t, file.AppendPage(NewPage(0)))
+		require.NoError(t, file.Close())
+
+		err = InsertRecord(filename, make([]byte, recordLen), 0)
+		assert.Error(t, err)
+	})
+
+	t.Run("new file", func(t *testing.T) {
+		filename := filepath.Join(t.TempDir(), "unfit_new.data")
+
+		err := InsertRecord(filename, make([]byte, recordLen), 0)
+		assert.Error(t, err)
+	})
 }

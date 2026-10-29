@@ -230,7 +230,9 @@ func ReadMoviesPages(path string) ([]MovieRecord, error) {
 //   - Raw records: EncodeMovieRecord(movieId, title, genres)
 //   - MVCC records: EncodeTxRecord(txRec)
 func InsertRecord(path string, encoded []byte, nullBitmap uint8) error {
-	recordLen := len(encoded)
+	// The FSM tracks total free space, so include the line pointer and
+	// null bitmap that AddRecord also needs.
+	needed := len(encoded) + 5
 
 	// try to open existing file
 	file, err := Open(path)
@@ -263,12 +265,14 @@ func InsertRecord(path string, encoded []byte, nullBitmap uint8) error {
 	defer fsm.Close()
 
 	// find page with space using FSM
-	if pageId, ok := fsm.FindPageWithSpace(recordLen); ok {
+	if pageId, ok := fsm.FindPageWithSpace(needed); ok {
 		page, err := file.ReadPage(pageId)
 		if err != nil {
 			return err
 		}
-		page.AddRecord(encoded, nullBitmap)
+		if !page.AddRecord(encoded, nullBitmap) {
+			return errors.New("record does not fit on page")
+		}
 		if err := file.WritePage(pageId, page); err != nil {
 			return err
 		}
@@ -297,14 +301,17 @@ func InsertRecord(path string, encoded []byte, nullBitmap uint8) error {
 
 // createNewFile creates a new file with one page containing the record.
 func createNewFile(path string, record []byte, nullBitmap uint8) error {
+	page := NewPage(0)
+	if !page.AddRecord(record, nullBitmap) {
+		return errors.New("record too large for page")
+	}
+
 	file, err := Create(path)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	page := NewPage(0)
-	page.AddRecord(record, nullBitmap)
 	if err := file.AppendPage(page); err != nil {
 		return err
 	}
