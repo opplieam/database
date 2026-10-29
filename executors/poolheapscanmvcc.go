@@ -19,8 +19,9 @@ import (
 // (TxMin, TxMax, CID), and only tuples visible to the transaction return.
 // There is no legacy raw-decode mode.
 //
-// MVCC decoding mirrors HeapFileScan.Next in MVCC mode. If one changes,
-// the other must follow until the pool path replaces the legacy one.
+// MVCC decoding and visibility are shared with HeapFileScan through
+// decodeVisibleTxRecord; page iteration differs because this scan borrows
+// pages from the buffer pool.
 //
 // Example state transitions for a file with 3 records (page 0 has 2, page 1 has 1):
 //
@@ -118,12 +119,12 @@ func (s *PoolHeapScanMVCC) Next() (storage.Tuple, error) {
 			}
 
 			// Step 3: visible? Yield it; invisible? Loop for the next record.
-			txRec, err := storage.DecodeTxRecord(recordBytes)
+			tuple, visible, err := decodeVisibleTxRecord(recordBytes, s.ctx)
 			if err != nil {
 				return nil, err
 			}
-			if txRec.Visible(s.ctx.Snapshot, s.ctx.Clog) {
-				return txRec.Data, nil
+			if visible {
+				return tuple, nil
 			}
 			// skip invisible record, continue loop
 		} else {

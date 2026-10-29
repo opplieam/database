@@ -108,14 +108,14 @@ func (h *HeapFileScan) Next() (storage.Tuple, error) {
 
 			if h.ctx != nil {
 				// MVCC mode: decode TxRecord and check visibility
-				txRec, err := storage.DecodeTxRecord(recordBytes)
+				tuple, visible, err := decodeVisibleTxRecord(recordBytes, h.ctx)
 				if err != nil {
 					return nil, err
 				}
-				if txRec.Visible(h.ctx.Snapshot, h.ctx.Clog) {
-					return txRec.Data, nil
+				if visible {
+					return tuple, nil
 				}
-				// skip invisible record, continue loop
+				// skip invisible record
 			} else {
 				// Legacy mode: decode raw MovieRecord
 				id, title, genres, err := storage.DecodeMovieRecord(recordBytes)
