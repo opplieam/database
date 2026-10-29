@@ -79,14 +79,19 @@ func NewPage(pageId uint32) *Page {
 //   bit 1 = title NULL
 //   bit 2 = genres NULL
 func (p *Page) AddRecord(record []byte, nullBitmap uint8) bool {
-	recordLen := uint16(len(record))
-	linePtrSize := uint16(4) // each line pointer is 4 bytes (offset + length)
-	nullBitmapSize := uint16(1) // 1 byte for null bitmap
+	recordLen := len(record)
+	linePtrSize := 4     // each line pointer is 4 bytes (offset + length)
+	nullBitmapSize := 1 // 1 byte for null bitmap
+
+	// Reject early so the uint16 casts below cannot wrap or underflow.
+	if recordLen > PageSize {
+		return false
+	}
 
 	// check if we have space: freeOffset + linePtrSize + nullBitmapSize + recordLen <= PageSize
 	// records grow backward from end of page
-	recordsStart := uint16(PageSize) - uint16(len(p.Records)) - recordLen
-	newFreeOffset := p.Header.FreeOffset + linePtrSize + nullBitmapSize
+	recordsStart := PageSize - len(p.Records) - recordLen
+	newFreeOffset := int(p.Header.FreeOffset) + linePtrSize + nullBitmapSize
 
 	if newFreeOffset > recordsStart {
 		return false
@@ -94,8 +99,8 @@ func (p *Page) AddRecord(record []byte, nullBitmap uint8) bool {
 
 	// add line pointer
 	p.LinePointers = append(p.LinePointers, LinePointer{
-		Offset: recordsStart,
-		Length: recordLen,
+		Offset: uint16(recordsStart),
+		Length: uint16(recordLen),
 	})
 
 	// add null bitmap
@@ -106,7 +111,7 @@ func (p *Page) AddRecord(record []byte, nullBitmap uint8) bool {
 
 	// update header
 	p.Header.RecordCount++
-	p.Header.FreeOffset = newFreeOffset
+	p.Header.FreeOffset = uint16(newFreeOffset)
 
 	return true
 }

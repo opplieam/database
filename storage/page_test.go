@@ -36,6 +36,30 @@ func TestAddRecord(t *testing.T) {
 	assert.Equal(t, uint8(2), page.NullBitmaps[1])
 }
 
+func TestAddRecordRejectsOversizedRecord(t *testing.T) {
+	tests := []struct {
+		name string
+		size int
+	}{
+		{"record just over page size", PageSize + 1},
+		{"record longer than uint16", 1 << 16},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			page := NewPage(0)
+
+			ok := page.AddRecord(make([]byte, tt.size), 0)
+
+			assert.False(t, ok)
+			assert.Equal(t, uint16(0), page.Header.RecordCount)
+			assert.Empty(t, page.LinePointers)
+			assert.Empty(t, page.NullBitmaps)
+			assert.Empty(t, page.Records)
+		})
+	}
+}
+
 func TestIsNull(t *testing.T) {
 	tests := []struct {
 		name     string
