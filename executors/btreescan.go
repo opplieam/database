@@ -36,7 +36,6 @@ type TupleReader func(tid storage.TID) (storage.TxRecord, error)
 //	tuple, err := scan.Next()
 //	// tuple = {1, "Movie A", "Action"}
 type BTreeScan struct {
-	tree      *btree.BTree
 	leaf      *btree.BTreeNode
 	idx       int
 	done      bool
@@ -56,7 +55,6 @@ func NewBTreeScan(tree *btree.BTree, readTuple TupleReader, ctx *TransactionCont
 	}
 
 	return &BTreeScan{
-		tree:      tree,
 		leaf:      leaf,
 		idx:       0,
 		ctx:       ctx,
