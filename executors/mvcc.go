@@ -15,3 +15,11 @@ func decodeVisibleTxRecord(recordBytes []byte, ctx *TransactionContext) (storage
 	}
 	return txRec.Data, true, nil
 }
+
+// encodeMVCCInsert builds the MVCC record for an insert. Callers write the
+// bytes through their own storage path.
+func encodeMVCCInsert(ctx *TransactionContext, data storage.Tuple) []byte {
+	cid := ctx.Tx.NextCID()
+	txRec := storage.InsertTxRecord(ctx.Tx.ID(), cid, data)
+	return storage.EncodeTxRecord(txRec)
+}

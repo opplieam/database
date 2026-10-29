@@ -54,9 +54,7 @@ func (i *Insert) Next() (storage.Tuple, error) {
 
 	if i.ctx != nil {
 		// MVCC mode: store TxRecord with metadata
-		cid := i.ctx.Tx.NextCID()
-		txRec := storage.InsertTxRecord(i.ctx.Tx.ID(), cid, i.data())
-		encoded = storage.EncodeTxRecord(txRec)
+		encoded = encodeMVCCInsert(i.ctx, i.data())
 	} else {
 		// Legacy mode: store raw MovieRecord
 		encoded = storage.EncodeMovieRecord(i.record.MovieId, i.record.Title, i.record.Genres)

@@ -83,9 +83,7 @@ func (in *PoolInsertMVCC) Next() (storage.Tuple, error) {
 	}
 
 	// Step 1: encode the MVCC record.
-	cid := in.ctx.Tx.NextCID()
-	txRec := storage.InsertTxRecord(in.ctx.Tx.ID(), cid, in.data())
-	encoded := storage.EncodeTxRecord(txRec)
+	encoded := encodeMVCCInsert(in.ctx, in.data())
 
 	// Step 2: ensure the file exists (empty); placement appends below.
 	if _, err := os.Stat(in.path); os.IsNotExist(err) {
