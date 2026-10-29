@@ -38,6 +38,18 @@ func TestCommitLog(t *testing.T) {
 	assert.False(t, clog.IsInProgress(2))
 }
 
+func TestCommitLogDoesNotMarkAfterAppendFailure(t *testing.T) {
+	clog, err := OpenCommitLog(filepath.Join(t.TempDir(), "clog.data"))
+	require.NoError(t, err)
+	require.NoError(t, clog.Close())
+
+	assert.Error(t, clog.LogCommit(1))
+	assert.False(t, clog.IsCommitted(1))
+
+	assert.Error(t, clog.LogAbort(2))
+	assert.False(t, clog.IsAborted(2))
+}
+
 func TestCommitLogPersistence(t *testing.T) {
 	clogFile := "test_clog_persist.data"
 	defer os.Remove(clogFile)

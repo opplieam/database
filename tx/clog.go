@@ -82,15 +82,21 @@ func OpenCommitLog(path string) (*CommitLog, error) {
 // LogCommit records that a transaction committed, in memory and on disk. It
 // syncs before returning, so a nil error means the mark is durable.
 func (cl *CommitLog) LogCommit(txID uint64) error {
+	if err := cl.append(txID, clogStatusCommitted); err != nil {
+		return err
+	}
 	cl.records[txID] = clogStatusCommitted
-	return cl.append(txID, clogStatusCommitted)
+	return nil
 }
 
 // LogAbort records that a transaction aborted, in memory and on disk. It syncs
 // before returning, so a nil error means the mark is durable.
 func (cl *CommitLog) LogAbort(txID uint64) error {
+	if err := cl.append(txID, clogStatusAborted); err != nil {
+		return err
+	}
 	cl.records[txID] = clogStatusAborted
-	return cl.append(txID, clogStatusAborted)
+	return nil
 }
 
 // IsCommitted reports whether the transaction is known to have committed. An
