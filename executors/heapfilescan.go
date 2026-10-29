@@ -52,16 +52,14 @@ import (
 //	io.EOF → no more pages
 //	h.done = true, return nil, io.EOF
 type HeapFileScan struct {
-	file       *os.File
-	pageCount  uint32
-	currentPage int
-	page       *storage.Page
-	recordIdx  int
-	done       bool
-	ctx        *TransactionContext
+	file      *os.File
+	page      *storage.Page
+	recordIdx int
+	done      bool
+	ctx       *TransactionContext
 }
 
-// NewHeapFileScan opens a binary file and reads the record count from the first 4 bytes.
+// NewHeapFileScan opens a binary file and reads past the record-count header.
 func NewHeapFileScan(path string, ctx *TransactionContext) (*HeapFileScan, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -77,9 +75,8 @@ func NewHeapFileScan(path string, ctx *TransactionContext) (*HeapFileScan, error
 	}
 
 	return &HeapFileScan{
-		file:      f,
-		pageCount: count,
-		ctx:       ctx,
+		file: f,
+		ctx:  ctx,
 	}, nil
 }
 
@@ -144,7 +141,6 @@ func (h *HeapFileScan) Next() (storage.Tuple, error) {
 
 		h.page = page
 		h.recordIdx = 0
-		h.currentPage++
 	}
 }
 
