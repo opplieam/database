@@ -115,3 +115,45 @@ func TestPoolHeapScanMVCCRequiresCtx(t *testing.T) {
 	_, err := NewPoolHeapScanMVCC(filename, nil, pool)
 	assert.Error(t, err)
 }
+
+func TestPoolHeapScanMVCCInvisible(t *testing.T) {
+	dir := t.TempDir()
+	filename := filepath.Join(dir, "pooled_invisible.data")
+	clog, err := tx.OpenCommitLog(filename + ".clog")
+	require.NoError(t, err)
+	defer clog.Close()
+
+	mgr := tx.NewManager()
+	pool := buffer.NewBufferPool(4)
+
+	// Writer: insert through the pool but leave the transaction active.
+	wtx := mgr.Begin(tx.RepeatableRead)
+	wctx := &TransactionContext{
+		Tx:       wtx,
+		Clog:     clog,
+		Snapshot: mgr.Snapshot(wtx),
+	}
+	ins := NewPoolInsertMVCC(filename, storage.MovieRecord{
+		MovieId: 1, Title: "Toy Story", Genres: "Genre",
+	}, 0, wctx, pool)
+	_, err = ins.Next()
+	require.NoError(t, err)
+	require.True(t, clog.IsCommitted(wtx.ID()))
+
+	// The row is in the cached page, so a zero-result scan tests
+	// visibility, not an unflushed or missing page.
+	tag := buffer.BufferTag{Path: filename, PageId: 0}
+	page, err := pool.Get(tag)
+	require.NoError(t, err)
+	require.Equal(t, 1, int(page.Header.RecordCount))
+	require.NoError(t, pool.Unpin(tag))
+
+	// Reader starts after the writer, so wtx is in its xip list.
+	scan, err := NewPoolHeapScanMVCC(filename, readCtx(mgr, clog), pool)
+	require.NoError(t, err)
+	result, err := Run(scan)
+	require.NoError(t, err)
+	assert.Equal(t, 0, len(result))
+	assert.Equal(t, 0, pool.PinnedCount())
+	assert.NoError(t, scan.Close())
+}
