@@ -205,19 +205,8 @@ func (in *PoolInsertMVCC) placeRecord(encoded []byte) error {
 			return err
 		}
 		if page.GetFreeSpace() >= need {
-			if !page.AddRecord(encoded, in.bitmap) {
-				_ = in.pool.Unpin(tag)
-				return errors.New("executors: record does not fit")
-			}
-			if err := in.appendWAL(pid, page, encoded); err != nil {
-				_ = in.pool.Unpin(tag)
-				return err
-			}
-			if err := in.pool.MarkDirty(tag); err != nil {
-				_ = in.pool.Unpin(tag)
-				return err
-			}
-			return in.pool.Unpin(tag)
+			return in.writePooledRecord(tag, page, encoded,
+				errors.New("executors: record does not fit"))
 		}
 		if err := in.pool.Unpin(tag); err != nil {
 			return err
@@ -234,11 +223,23 @@ func (in *PoolInsertMVCC) placeRecord(encoded []byte) error {
 	if err != nil {
 		return err
 	}
+	return in.writePooledRecord(tag, page, encoded,
+		errors.New("executors: record too large for page"))
+}
+
+// writePooledRecord adds the record, logs it, marks the page dirty, and
+// unpins. Every failure path unpins before returning.
+func (in *PoolInsertMVCC) writePooledRecord(
+	tag buffer.BufferTag,
+	page *storage.Page,
+	encoded []byte,
+	fitErr error,
+) error {
 	if !page.AddRecord(encoded, in.bitmap) {
 		_ = in.pool.Unpin(tag)
-		return errors.New("executors: record too large for page")
+		return fitErr
 	}
-	if err := in.appendWAL(pid, page, encoded); err != nil {
+	if err := in.appendWAL(tag.PageId, page, encoded); err != nil {
 		_ = in.pool.Unpin(tag)
 		return err
 	}

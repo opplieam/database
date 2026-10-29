@@ -2,6 +2,7 @@ package executors
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"database/buffer"
@@ -264,4 +265,92 @@ func TestPoolInsertCommitsToWAL(t *testing.T) {
 
 	// CLOG marked committed after the log records.
 	assert.True(t, clog.IsCommitted(wtx.ID()))
+}
+
+func TestPoolInsertMVCCOnePage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pooled_one_page.data")
+	clog, err := tx.OpenCommitLog(path + ".clog")
+	require.NoError(t, err)
+	defer clog.Close()
+	mgr := tx.NewManager()
+	pool := buffer.NewBufferPool(4)
+
+	wtx := mgr.Begin(tx.RepeatableRead)
+	wctx := &TransactionContext{Tx: wtx, Clog: clog, Snapshot: mgr.Snapshot(wtx)}
+	for i := uint32(1); i <= 2; i++ {
+		ins := NewPoolInsertMVCC(path, storage.MovieRecord{
+			MovieId: i, Title: "Toy Story", Genres: "Genre",
+		}, 0, wctx, pool)
+		_, err = ins.Next()
+		require.NoError(t, err)
+	}
+
+	count, err := pageCount(path)
+	require.NoError(t, err)
+	assert.Equal(t, uint32(1), count)
+
+	tag := buffer.BufferTag{Path: path, PageId: 0}
+	page, err := pool.Get(tag)
+	require.NoError(t, err)
+	assert.Equal(t, 2, int(page.Header.RecordCount))
+	require.NoError(t, pool.Unpin(tag))
+	assert.Equal(t, 0, pool.PinnedCount())
+}
+
+func TestPoolInsertMVCCAppendPage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pooled_append.data")
+	clog, err := tx.OpenCommitLog(path + ".clog")
+	require.NoError(t, err)
+	defer clog.Close()
+	mgr := tx.NewManager()
+	pool := buffer.NewBufferPool(4)
+
+	wtx := mgr.Begin(tx.RepeatableRead)
+	wctx := &TransactionContext{Tx: wtx, Clog: clog, Snapshot: mgr.Snapshot(wtx)}
+	title := strings.Repeat("x", 3000)
+	for i := uint32(1); i <= 2; i++ {
+		ins := NewPoolInsertMVCC(path, storage.MovieRecord{
+			MovieId: i, Title: title, Genres: "Genre",
+		}, 0, wctx, pool)
+		_, err = ins.Next()
+		require.NoError(t, err)
+	}
+
+	count, err := pageCount(path)
+	require.NoError(t, err)
+	assert.Equal(t, uint32(2), count)
+
+	for pid := uint32(0); pid < count; pid++ {
+		tag := buffer.BufferTag{Path: path, PageId: pid}
+		page, err := pool.Get(tag)
+		require.NoError(t, err)
+		assert.Equal(t, 1, int(page.Header.RecordCount))
+		require.NoError(t, pool.Unpin(tag))
+	}
+	assert.Equal(t, 0, pool.PinnedCount())
+}
+
+func TestPoolInsertMVCCRecordTooLarge(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pooled_too_large.data")
+	clog, err := tx.OpenCommitLog(path + ".clog")
+	require.NoError(t, err)
+	defer clog.Close()
+	mgr := tx.NewManager()
+	pool := buffer.NewBufferPool(4)
+
+	wtx := mgr.Begin(tx.RepeatableRead)
+	wctx := &TransactionContext{Tx: wtx, Clog: clog, Snapshot: mgr.Snapshot(wtx)}
+	// 4040 title bytes encode to a 4080-byte TxRecord. SpaceNeeded adds
+	// the line pointer and null bitmap, so the record cannot fit an empty
+	// page, while staying below PageSize to avoid uint16 offset underflow.
+	ins := NewPoolInsertMVCC(path, storage.MovieRecord{
+		MovieId: 1, Title: strings.Repeat("x", 4040), Genres: "Genre",
+	}, 0, wctx, pool)
+	_, err = ins.Next()
+	require.Error(t, err)
+	assert.EqualError(t, err, "executors: record too large for page")
+	assert.Equal(t, 0, pool.PinnedCount())
 }
