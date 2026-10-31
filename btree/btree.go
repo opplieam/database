@@ -943,29 +943,34 @@ func (t *BTree) RangeScanKeys(min, max int) []int {
 
 // Save writes the B+ tree to a file.
 //
-// File format:
-//   - Header: magic bytes "BTREE" (5 bytes)
+// File format, all integers little-endian:
+//
+//   - Header: magic bytes btreeMagic (5 bytes)
 //   - Node count (4 bytes)
-//   - For each node:
+//   - For each node, in the order the IDs were assigned:
 //     - IsLeaf (1 byte: 0 or 1)
 //     - Key count (2 bytes)
 //     - Keys (key_count × 4 bytes)
-//     - For leaf: values (key_count × encoded tuples)
-//     - For internal: child indices (key_count+1 × 4 bytes)
-//     - Next leaf index (4 bytes, -1 if none)
+//     - Leaf only: TIDs (key_count × tidSize bytes each)
+//     - Leaf only: next leaf index (4 bytes, noNextLeaf if none)
+//     - Internal only: child indices ((key_count+1) × 4 bytes)
+//
+// Nodes are written root-first, then each child subtree, so a child's index is
+// normally higher than its parent's. That is why LoadBTree resolves pointers in
+// a second pass.
 //
 // Example: tree with 3 nodes
 //
 //   root (internal): Keys=[30], Children=[leaf1, leaf2]
-//   leaf1: Keys=[10,20], Values=[t1,t2], Next=leaf2
-//   leaf2: Keys=[30,40], Values=[t3,t4], Next=nil
+//   leaf1: Keys=[10,20], TIDs=[t1,t2], Next=leaf2
+//   leaf2: Keys=[30,40], TIDs=[t3,t4], Next=nil
 //
 // File layout:
-//   "BTREE"
+//   btreeMagic
 //   3 (node count)
-//   node0: internal, 1 key, [30], children=[1,2], next=-1
-//   node1: leaf, 2 keys, [10,20], values=[...], next=2
-//   node2: leaf, 2 keys, [30,40], values=[...], next=-1
+//   node0: internal, 1 key, [30], children=[1,2]
+//   node1: leaf, 2 keys, [10,20], TIDs=[t1,t2], next=2
+//   node2: leaf, 2 keys, [30,40], TIDs=[t3,t4], next=noNextLeaf
 //
 func (t *BTree) Save(path string) error {
 	f, err := os.Create(path)
