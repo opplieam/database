@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+
 	"database/storage"
 )
 
@@ -52,18 +53,20 @@ const (
 // BTreeNode represents a node in the B+ tree.
 //
 // Internal node:
-//   IsLeaf = false
-//   Keys = [30, 60]          (n-1 keys for n children)
-//   Children = [nodeA, nodeB, nodeC]
-//   TIDs = nil (not used)
-//   Next = nil (not used)
+//
+//	IsLeaf = false
+//	Keys = [30, 60]          (n-1 keys for n children)
+//	Children = [nodeA, nodeB, nodeC]
+//	TIDs = nil (not used)
+//	Next = nil (not used)
 //
 // Leaf node:
-//   IsLeaf = true
-//   Keys = [10, 20, 30]
-//   Children = nil (not used)
-//   TIDs = [{Page:0,Slot:0}, {Page:1,Slot:2}, {Page:2,Slot:1}]  (one per key)
-//   Next = pointer to next leaf (for range scans)
+//
+//	IsLeaf = true
+//	Keys = [10, 20, 30]
+//	Children = nil (not used)
+//	TIDs = [{Page:0,Slot:0}, {Page:1,Slot:2}, {Page:2,Slot:1}]  (one per key)
+//	Next = pointer to next leaf (for range scans)
 type BTreeNode struct {
 	IsLeaf   bool
 	Keys     []int
@@ -80,10 +83,12 @@ type BTree struct {
 // NewBTree creates an empty B+ tree.
 //
 // Initial state:
-//   Root = nil (empty tree)
+//
+//	Root = nil (empty tree)
 //
 // After first insert:
-//   Root = leaf node with one key-value pair
+//
+//	Root = leaf node with one key-value pair
 func NewBTree() *BTree {
 	return &BTree{Root: nil}
 }
@@ -121,12 +126,14 @@ func NewInternalNode() *BTreeNode {
 // IsFull returns true if the node has reached its maximum capacity.
 //
 // For leaf node:
-//   Full when len(Keys) == BTreeNodeOrder
-//   Example: order=4, node has 4 keys → full
+//
+//	Full when len(Keys) == BTreeNodeOrder
+//	Example: order=4, node has 4 keys → full
 //
 // For internal node:
-//   Full when len(Children) == BTreeNodeOrder
-//   Example: order=4, node has 4 children → full
+//
+//	Full when len(Children) == BTreeNodeOrder
+//	Example: order=4, node has 4 children → full
 func (n *BTreeNode) IsFull() bool {
 	if n.IsLeaf {
 		return len(n.Keys) >= BTreeNodeOrder
@@ -137,12 +144,14 @@ func (n *BTreeNode) IsFull() bool {
 // IsUnderflow returns true if the node has too few keys (for deletion).
 //
 // For leaf node:
-//   Underflow when len(Keys) < BTreeNodeOrder/2
-//   Example: order=4, node has 1 key → underflow (need at least 2)
+//
+//	Underflow when len(Keys) < BTreeNodeOrder/2
+//	Example: order=4, node has 1 key → underflow (need at least 2)
 //
 // For internal node:
-//   Underflow when len(Children) < (BTreeNodeOrder+1)/2
-//   Example: order=4, node has 1 child → underflow (need at least 2)
+//
+//	Underflow when len(Children) < (BTreeNodeOrder+1)/2
+//	Example: order=4, node has 1 child → underflow (need at least 2)
 func (n *BTreeNode) IsUnderflow() bool {
 	if n.IsLeaf {
 		return len(n.Keys) < BTreeNodeOrder/2
@@ -153,10 +162,12 @@ func (n *BTreeNode) IsUnderflow() bool {
 // String returns a debug representation of the node.
 //
 // Example leaf:
-//   "Leaf[10, 20, 30]"
+//
+//	"Leaf[10, 20, 30]"
 //
 // Example internal:
-//   "Internal[30, 60] → 3 children"
+//
+//	"Internal[30, 60] → 3 children"
 func (n *BTreeNode) String() string {
 	if n.IsLeaf {
 		return "Leaf" + fmt.Sprint(n.Keys)
@@ -167,29 +178,31 @@ func (n *BTreeNode) String() string {
 // Search finds a key in the B+ tree and returns its value.
 //
 // Algorithm:
-//   1. Start at root
-//   2. Find child pointer where key fits (go left if key < node key)
-//   3. Move to child, repeat until leaf
-//   4. Search leaf for key, return value if found
+//  1. Start at root
+//  2. Find child pointer where key fits (go left if key < node key)
+//  3. Move to child, repeat until leaf
+//  4. Search leaf for key, return value if found
 //
 // Example: Search(45) in this tree
 //
-//                    [30 | 60]
-//                   /    |    \
-//    [10 | 20]  [40 | 50]  [70 | 80]
-//       ↓          ↓          ↓
-//    [1,2,10] → [20,30,40] → [50,60,70] → [80,90]
+//	                [30 | 60]
+//	               /    |    \
+//	[10 | 20]  [40 | 50]  [70 | 80]
+//	   ↓          ↓          ↓
+//	[1,2,10] → [20,30,40] → [50,60,70] → [80,90]
 //
 // Steps:
-//   root [30,60]: 45 >= 30, 45 < 60 → go to middle child
-//   internal [40,50]: 45 >= 40, 45 < 50 → go to first child
-//   leaf [40,50]: search for 45 → not found
-//   return nil, false
+//
+//	root [30,60]: 45 >= 30, 45 < 60 → go to middle child
+//	internal [40,50]: 45 >= 40, 45 < 50 → go to first child
+//	leaf [40,50]: search for 45 → not found
+//	return nil, false
 //
 // Example: Search(40)
-//   Same path as above
-//   leaf [40,50]: search for 40 → found at index 0
-//	return TIDs[0], true
+//
+//	  Same path as above
+//	  leaf [40,50]: search for 40 → found at index 0
+//		return TIDs[0], true
 func (t *BTree) Search(key int) (storage.TID, bool) {
 	if t.Root == nil {
 		return storage.TID{}, false
@@ -255,20 +268,21 @@ func (t *BTree) findLeftmostLeaf() *BTreeNode {
 // Insert adds a key-value pair to the B+ tree.
 //
 // Algorithm:
-//   1. If tree is empty, create root leaf node
-//   2. Find correct leaf node
-//   3. Insert key-value in sorted order
-//   4. If leaf overflows, split it
-//   5. If parent overflows, split parent (recursive)
+//  1. If tree is empty, create root leaf node
+//  2. Find correct leaf node
+//  3. Insert key-value in sorted order
+//  4. If leaf overflows, split it
+//  5. If parent overflows, split parent (recursive)
 //
 // Example: Insert(35) into tree
 //
 // Before:
-//                    [30 | 60]
-//                   /    |    \
-//    [10 | 20]  [30 | 40 | 50]  [70 | 80]    ← middle leaf is full (3 keys)
-//       ↓          ↓          ↓
-//    [1,2,10] → [30,40,50] → [70,80,90]
+//
+//	                [30 | 60]
+//	               /    |    \
+//	[10 | 20]  [30 | 40 | 50]  [70 | 80]    ← middle leaf is full (3 keys)
+//	   ↓          ↓          ↓
+//	[1,2,10] → [30,40,50] → [70,80,90]
 //
 // Step 1: Find leaf for key 35 → middle leaf [30,40,50]
 // Step 2: Insert 35 → [30,35,40,50] → overflow! (4 keys, max is 3)
@@ -278,12 +292,12 @@ func (t *BTree) findLeftmostLeaf() *BTreeNode {
 //   - Push up key: 40 (middle key)
 //
 // After:
-//                    [30 | 40 | 60]
-//                   /    |    |    \
-//    [10 | 20]  [30,35] [40,50]  [70 | 80]
-//       ↓          ↓       ↓        ↓
-//    [1,2,10] → [...] → [...] → [...]
 //
+//	                [30 | 40 | 60]
+//	               /    |    |    \
+//	[10 | 20]  [30,35] [40,50]  [70 | 80]
+//	   ↓          ↓       ↓        ↓
+//	[1,2,10] → [...] → [...] → [...]
 func (t *BTree) Insert(key int, tid storage.TID) {
 	// empty tree: create root leaf
 	if t.Root == nil {
@@ -381,12 +395,14 @@ func (t *BTree) splitLeaf(leaf *BTreeNode) {
 // Example: parent has [30, 60], left is child[1], we insert key=40, right=new node
 //
 // Before:
-//   parent.Keys = [30, 60]
-//   parent.Children = [A, left, C]
+//
+//	parent.Keys = [30, 60]
+//	parent.Children = [A, left, C]
 //
 // After:
-//   parent.Keys = [30, 40, 60]
-//   parent.Children = [A, left, right, C]
+//
+//	parent.Keys = [30, 40, 60]
+//	parent.Children = [A, left, right, C]
 //
 // If parent overflows, split it too (recursive)
 func (t *BTree) insertIntoParent(left *BTreeNode, key int, right *BTreeNode) {
@@ -429,14 +445,15 @@ func (t *BTree) insertIntoParent(left *BTreeNode, key int, right *BTreeNode) {
 // Example: split internal [30, 40, 60] (order=4, full, 4 children)
 //
 // Before:
-//   node.Keys = [30, 40, 60]
-//   node.Children = [A, B, C, D]
+//
+//	node.Keys = [30, 40, 60]
+//	node.Children = [A, B, C, D]
 //
 // After split:
-//   node (left):  Keys = [30], Children = [A, B]
-//   new (right):  Keys = [60], Children = [C, D]
-//   push up key: 40 (the middle key)
 //
+//	node (left):  Keys = [30], Children = [A, B]
+//	new (right):  Keys = [60], Children = [C, D]
+//	push up key: 40 (the middle key)
 func (t *BTree) splitInternal(node *BTreeNode) {
 	// find middle index
 	mid := len(node.Keys) / 2
@@ -518,19 +535,20 @@ func printNode(node *BTreeNode, level int) {
 // Delete removes a key from the B+ tree.
 //
 // Algorithm:
-//   1. Find leaf containing key
-//   2. Remove key-value pair
-//   3. If leaf underflows (too few keys):
-//      a. Try borrowing from sibling (redistribute)
-//      b. If can't borrow, merge with sibling
-//   4. If parent underflows, merge parent too (recursive)
+//  1. Find leaf containing key
+//  2. Remove key-value pair
+//  3. If leaf underflows (too few keys):
+//     a. Try borrowing from sibling (redistribute)
+//     b. If can't borrow, merge with sibling
+//  4. If parent underflows, merge parent too (recursive)
 //
 // Example: Delete(20) from this tree
 //
 // Before:
-//        [30, 40]
-//       /   |   \
-//    [10,20] [30,35] [40,50]
+//
+//	    [30, 40]
+//	   /   |   \
+//	[10,20] [30,35] [40,50]
 //
 // Step 1: Find leaf for key 20 → left leaf [10, 20]
 // Step 2: Remove 20 → [10]
@@ -543,10 +561,10 @@ func printNode(node *BTreeNode, level int) {
 //   - Update parent key: 30 → 35
 //
 // After:
-//        [35, 40]
-//       /   |   \
-//    [10,30] [35] [40,50]
 //
+//	    [35, 40]
+//	   /   |   \
+//	[10,30] [35] [40,50]
 func (t *BTree) Delete(key int) {
 	if t.Root == nil {
 		return
@@ -621,27 +639,30 @@ func (t *BTree) DeleteByTID(tid storage.TID) bool {
 // handleUnderflow handles a node that has too few keys.
 //
 // Two options:
-//   1. Borrow from left or right sibling (redistribute)
-//   2. Merge with sibling
+//  1. Borrow from left or right sibling (redistribute)
+//  2. Merge with sibling
 //
 // Example: handle underflow in leaf [10]
 //
 // Tree:
-//        [30, 40]
-//       /   |   \
-//    [10] [30,35] [40,50]
+//
+//	    [30, 40]
+//	   /   |   \
+//	[10] [30,35] [40,50]
 //
 // Option 1: Borrow from right sibling [30,35]
-//   sibling has 3 keys, we need 2 → can borrow
-//   take 30 from sibling
-//   leaf: [10, 30]
-//   sibling: [35]
-//   update parent key: 30 → 35
+//
+//	sibling has 3 keys, we need 2 → can borrow
+//	take 30 from sibling
+//	leaf: [10, 30]
+//	sibling: [35]
+//	update parent key: 30 → 35
 //
 // Option 2: Merge with sibling (if sibling can't lend)
-//   merge leaf [10] with sibling [30,35] → [10, 30, 35]
-//   remove parent key 30
-//   remove sibling from parent children
+//
+//	merge leaf [10] with sibling [30,35] → [10, 30, 35]
+//	remove parent key 30
+//	remove sibling from parent children
 func (t *BTree) handleUnderflow(node *BTreeNode) {
 	parent := t.findParent(node)
 	if parent == nil {
@@ -690,14 +711,15 @@ func (t *BTree) handleUnderflow(node *BTreeNode) {
 // Example: borrow from left sibling [30, 35]
 //
 // Before:
-//   parent.Keys = [30, 40]
-//   parent.Children = [[10], [30,35], [40,50]]
-//                     idx-1  idx
+//
+//	parent.Keys = [30, 40]
+//	parent.Children = [[10], [30,35], [40,50]]
+//	                  idx-1  idx
 //
 // After:
-//   parent.Keys = [35, 40]  (changed 30 → 35)
-//   parent.Children = [[10,30], [35], [40,50]]
 //
+//	parent.Keys = [35, 40]  (changed 30 → 35)
+//	parent.Children = [[10,30], [35], [40,50]]
 func (t *BTree) borrowFromLeft(node *BTreeNode, leftSibling *BTreeNode, parent *BTreeNode, siblingIdx int) {
 	if node.IsLeaf {
 		// leaf: take last key from sibling
@@ -737,15 +759,16 @@ func (t *BTree) borrowFromLeft(node *BTreeNode, leftSibling *BTreeNode, parent *
 // Example: borrow from right sibling [30, 35]
 //
 // Before:
-//   parent.Keys = [30, 40]
-//   parent.Children = [[10], [30,35], [40,50]]
-//                     idx   idx+1
+//
+//	parent.Keys = [30, 40]
+//	parent.Children = [[10], [30,35], [40,50]]
+//	                  idx   idx+1
 //
 // After:
-//   parent.Keys = [30, 35]  (changed 40 → 35... wait, need to think)
-//   Actually: parent.Keys = [30, 40] → [30, 35]
-//   parent.Children = [[10], [30], [35, 40, 50]]
 //
+//	parent.Keys = [30, 35]  (changed 40 → 35... wait, need to think)
+//	Actually: parent.Keys = [30, 40] → [30, 35]
+//	parent.Children = [[10], [30], [35, 40, 50]]
 func (t *BTree) borrowFromRight(node *BTreeNode, rightSibling *BTreeNode, parent *BTreeNode, siblingIdx int) {
 	if node.IsLeaf {
 		// leaf: take first key from sibling
@@ -785,13 +808,14 @@ func (t *BTree) borrowFromRight(node *BTreeNode, rightSibling *BTreeNode, parent
 // Example: merge [10] with left sibling [30, 35]
 //
 // Before:
-//   parent.Keys = [30, 40]
-//   parent.Children = [[10], [30,35], [40,50]]
+//
+//	parent.Keys = [30, 40]
+//	parent.Children = [[10], [30,35], [40,50]]
 //
 // After:
-//   parent.Keys = [40]
-//   parent.Children = [[10,30,35], [40,50]]
 //
+//	parent.Keys = [40]
+//	parent.Children = [[10,30,35], [40,50]]
 func (t *BTree) mergeWithLeft(node *BTreeNode, leftSibling *BTreeNode, parent *BTreeNode, siblingIdx int) {
 	if node.IsLeaf {
 		mergeLeafNodes(leftSibling, node)
@@ -806,13 +830,14 @@ func (t *BTree) mergeWithLeft(node *BTreeNode, leftSibling *BTreeNode, parent *B
 // Example: merge [35] with right sibling [40, 50]
 //
 // Before:
-//   parent.Keys = [35, 40]
-//   parent.Children = [[10,30], [35], [40,50]]
+//
+//	parent.Keys = [35, 40]
+//	parent.Children = [[10,30], [35], [40,50]]
 //
 // After:
-//   parent.Keys = [35]
-//   parent.Children = [[10,30], [35,40,50]]
 //
+//	parent.Keys = [35]
+//	parent.Children = [[10,30], [35,40,50]]
 func (t *BTree) mergeWithRight(node *BTreeNode, rightSibling *BTreeNode, parent *BTreeNode, siblingIdx int) {
 	if node.IsLeaf {
 		mergeLeafNodes(node, rightSibling)
@@ -864,30 +889,30 @@ func (t *BTree) removeSiblingFromParent(parent *BTreeNode, separatorIdx int) {
 // RangeScanKeys returns every key where min <= key <= max, in order.
 //
 // Algorithm:
-//   1. Find the first leaf where min could be
-//   2. Walk the linked leaf list, collecting keys in range
-//   3. Stop as soon as a key is above max
+//  1. Find the first leaf where min could be
+//  2. Walk the linked leaf list, collecting keys in range
+//  3. Stop as soon as a key is above max
 //
 // Example: RangeScanKeys(25, 45) in this tree
 //
-//        [30, 40]
-//       /   |   \
-//    [10,20,25] [30,35] [40,50]
-//       ↓         ↓        ↓
-//    leaf1 →   leaf2 →  leaf3
+//	    [30, 40]
+//	   /   |   \
+//	[10,20,25] [30,35] [40,50]
+//	   ↓         ↓        ↓
+//	leaf1 →   leaf2 →  leaf3
 //
 // Steps:
-//   1. Find leaf for key 25 → leaf1 [10, 20, 25]
-//   2. Start at leaf1:
-//      - 10 < 25? skip
-//      - 20 < 25? skip
-//      - 25 >= 25 and 25 <= 45? collect
-//   3. Follow the Next link to leaf2 [30, 35]:
-//      - 30 >= 25 and 30 <= 45? collect
-//      - 35 >= 25 and 35 <= 45? collect
-//   4. Follow the Next link to leaf3 [40, 50]:
-//      - 40 >= 25 and 40 <= 45? collect
-//      - 50 <= 45? NO, stop
+//  1. Find leaf for key 25 → leaf1 [10, 20, 25]
+//  2. Start at leaf1:
+//     - 10 < 25? skip
+//     - 20 < 25? skip
+//     - 25 >= 25 and 25 <= 45? collect
+//  3. Follow the Next link to leaf2 [30, 35]:
+//     - 30 >= 25 and 30 <= 45? collect
+//     - 35 >= 25 and 35 <= 45? collect
+//  4. Follow the Next link to leaf3 [40, 50]:
+//     - 40 >= 25 and 40 <= 45? collect
+//     - 50 <= 45? NO, stop
 //
 // Result: [25, 30, 35, 40]
 func (t *BTree) RangeScanKeys(min, max int) []int {
@@ -924,12 +949,12 @@ func (t *BTree) RangeScanKeys(min, max int) []int {
 //   - Header: magic bytes btreeMagic (5 bytes)
 //   - Node count (4 bytes)
 //   - For each node, in the order the IDs were assigned:
-//     - IsLeaf (1 byte: 0 or 1)
-//     - Key count (2 bytes)
-//     - Keys (key_count × 4 bytes)
-//     - Leaf only: TIDs (key_count × tidSize bytes each)
-//     - Leaf only: next leaf index (4 bytes, noNextLeaf if none)
-//     - Internal only: child indices ((key_count+1) × 4 bytes)
+//   - IsLeaf (1 byte: 0 or 1)
+//   - Key count (2 bytes)
+//   - Keys (key_count × 4 bytes)
+//   - Leaf only: TIDs (key_count × tidSize bytes each)
+//   - Leaf only: next leaf index (4 bytes, noNextLeaf if none)
+//   - Internal only: child indices ((key_count+1) × 4 bytes)
 //
 // Nodes are written root-first, then each child subtree, so a child's index is
 // normally higher than its parent's. That is why LoadBTree resolves pointers in
@@ -937,17 +962,17 @@ func (t *BTree) RangeScanKeys(min, max int) []int {
 //
 // Example: tree with 3 nodes
 //
-//   root (internal): Keys=[30], Children=[leaf1, leaf2]
-//   leaf1: Keys=[10,20], TIDs=[t1,t2], Next=leaf2
-//   leaf2: Keys=[30,40], TIDs=[t3,t4], Next=nil
+//	root (internal): Keys=[30], Children=[leaf1, leaf2]
+//	leaf1: Keys=[10,20], TIDs=[t1,t2], Next=leaf2
+//	leaf2: Keys=[30,40], TIDs=[t3,t4], Next=nil
 //
 // File layout:
-//   btreeMagic
-//   3 (node count)
-//   node0: internal, 1 key, [30], children=[1,2]
-//   node1: leaf, 2 keys, [10,20], TIDs=[t1,t2], next=2
-//   node2: leaf, 2 keys, [30,40], TIDs=[t3,t4], next=noNextLeaf
 //
+//	btreeMagic
+//	3 (node count)
+//	node0: internal, 1 key, [30], children=[1,2]
+//	node1: leaf, 2 keys, [10,20], TIDs=[t1,t2], next=2
+//	node2: leaf, 2 keys, [30,40], TIDs=[t3,t4], next=noNextLeaf
 func (t *BTree) Save(path string) error {
 	f, err := os.Create(path)
 	if err != nil {
