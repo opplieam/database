@@ -266,3 +266,34 @@ func TestBTreeDeleteBorrowsFromRightSibling(t *testing.T) {
 	assert.True(t, ok, "Search(30) after borrow: should be found")
 	assert.Equal(t, storage.TID{PageId: 0, SlotId: 3}, tid, "Search(30) after borrow: TID mismatch")
 }
+
+// TestBTreeDeleteMergesInternalIntoLeftSibling drives the leftward merge of two
+// internal nodes, the one path the other delete tests never reach.
+//
+// Example: order 4, minimum 2 keys per leaf and 2 children per internal node
+//
+//	before: root[50,90] -> A[30] (L1,R1), B[70] (R2,R3), C[110] (R4,R5)
+//	delete 110: R5=[120] underflows, merges into R4 -> R4=[90,100,120], C=[]
+//	            C underflows, merges into B -> B=[70,90], root=[50]
+//	after:  [10,20] -> [30,40] -> [50,60] -> [70,80] -> [90,100,120]
+func TestBTreeDeleteMergesInternalIntoLeftSibling(t *testing.T) {
+	tree := NewBTree()
+	for i := 1; i <= 12; i++ {
+		tree.Insert(i*10, storage.TID{PageId: 0, SlotId: uint16(i)})
+	}
+	before := collectLeafKeys(t, tree)
+
+	tree.Delete(110)
+
+	after := collectLeafKeys(t, tree)
+	assert.Len(t, after, len(before)-1, "one leaf disappears per merge")
+
+	expected := []int{10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 120}
+	assert.Equal(t, expected, flattenLeafKeys(after), "keys after internal merge")
+	assert.Equal(t, expected, tree.RangeScanKeys(0, 1000), "range scan after internal merge")
+
+	_, ok := tree.Search(110)
+	assert.False(t, ok, "Search(110) after delete: should not be found")
+	_, ok = tree.Search(120)
+	assert.True(t, ok, "Search(120) after merge: should be found")
+}
