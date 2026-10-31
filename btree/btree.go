@@ -1207,39 +1207,6 @@ func readNodeWithIDs(f *os.File) (*BTreeNode, []uint32, uint32, error) {
 	return node, childIDs, nextID, nil
 }
 
-// encodeTuple encodes a Tuple to bytes (simplified).
-func encodeTuple(t storage.Tuple) []byte {
-	if len(t) == 0 {
-		return []byte{0}
-	}
-	// encode as: count + each value as string
-	var result []byte
-	result = append(result, byte(len(t)))
-	for _, v := range t {
-		s := fmt.Sprint(v)
-		result = append(result, byte(len(s)))
-		result = append(result, []byte(s)...)
-	}
-	return result
-}
-
-// decodeTuple decodes bytes to a Tuple (simplified).
-func decodeTuple(data []byte) storage.Tuple {
-	if len(data) == 0 {
-		return nil
-	}
-	count := int(data[0])
-	t := make(storage.Tuple, count)
-	offset := 1
-	for i := 0; i < count; i++ {
-		strLen := int(data[offset])
-		offset++
-		t[i] = string(data[offset : offset+strLen])
-		offset += strLen
-	}
-	return t
-}
-
 // encodeTID encodes a TID to bytes (8 bytes: 4 for PageId + 2 for SlotId + 2 padding).
 func encodeTID(tid storage.TID) []byte {
 	buf := make([]byte, tidSize)
