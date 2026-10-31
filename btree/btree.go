@@ -998,6 +998,27 @@ func (t *BTree) Save(path string) error {
 }
 
 // LoadBTree reads a B+ tree from a file.
+//
+// The file stores IDs, not pointers: a child is a node index, and a leaf's next
+// leaf is a node index too. So loading is one read followed by one in-memory
+// fixup, in two loops over the same data:
+//
+//  1. read every node, keeping the IDs that the pointers are built from
+//  2. resolve those IDs into pointers
+//
+// Two loops are required: a child's index can be higher than its parent's, so
+// the child may not exist yet when its parent is wired up. Save writes the root
+// first, so this is the normal case, not an edge case.
+//
+// Example: the 3-node file written by Save
+//
+//	node0: internal, keys=[30], children=[1,2]
+//	node1: leaf, keys=[10,20], next=2, TIDs=[...]
+//	node2: leaf, keys=[30,40], next=0xFFFFFFFF, TIDs=[...]
+//
+// After loop 2: nodes[0].Children = [nodes[1], nodes[2]] and
+// nodes[1].Next = nodes[2]. The 0xFFFFFFFF is >= the node count, so nodes[2]
+// keeps Next == nil and the chain ends there.
 func LoadBTree(path string) (*BTree, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -1020,45 +1041,33 @@ func LoadBTree(path string) (*BTree, error) {
 		return nil, err
 	}
 
-	// read all nodes (without pointers)
+	// pass 1: read every node once, keep the IDs that the pointers need
 	nodes := make([]*BTreeNode, nodeCount)
+	childIDs := make([][]uint32, nodeCount)
+	nextIDs := make([]uint32, nodeCount)
 	for i := uint32(0); i < nodeCount; i++ {
-		node, childIDs, nextID, err := readNodeWithIDs(f)
+		node, ids, nextID, err := readNodeWithIDs(f)
 		if err != nil {
 			return nil, err
 		}
 		nodes[i] = node
-		
-		// store IDs for rebuilding pointers
-		type tempData struct {
-			childIDs []uint32
-			nextID   uint32
-		}
-		// store in a map keyed by index
-		_ = childIDs
-		_ = nextID
+		childIDs[i] = ids
+		nextIDs[i] = nextID
 	}
 
-	// rebuild pointers
-	// re-read to get the IDs
-	f.Seek(5+4, 0) // skip magic + count
+	// pass 2: resolve IDs to pointers, no further reads
 	for i := uint32(0); i < nodeCount; i++ {
-		_, childIDs, nextID, err := readNodeWithIDs(f)
-		if err != nil {
-			return nil, err
-		}
-		
 		if !nodes[i].IsLeaf {
-			nodes[i].Children = make([]*BTreeNode, len(childIDs))
-			for j, childID := range childIDs {
+			nodes[i].Children = make([]*BTreeNode, len(childIDs[i]))
+			for j, childID := range childIDs[i] {
 				if childID < nodeCount {
 					nodes[i].Children[j] = nodes[childID]
 				}
 			}
 		}
-		
-		if nodes[i].IsLeaf && nextID < nodeCount {
-			nodes[i].Next = nodes[nextID]
+
+		if nodes[i].IsLeaf && nextIDs[i] < nodeCount {
+			nodes[i].Next = nodes[nextIDs[i]]
 		}
 	}
 
