@@ -853,7 +853,35 @@ func (t *BTree) mergeWithRight(node *BTreeNode, rightSibling *BTreeNode, parent 
 	}
 }
 
-// RangeScanKeys returns just the keys in range (for debugging).
+// RangeScanKeys returns every key where min <= key <= max, in order.
+//
+// Algorithm:
+//   1. Find the first leaf where min could be
+//   2. Walk the linked leaf list, collecting keys in range
+//   3. Stop as soon as a key is above max
+//
+// Example: RangeScanKeys(25, 45) in this tree
+//
+//        [30, 40]
+//       /   |   \
+//    [10,20,25] [30,35] [40,50]
+//       ↓         ↓        ↓
+//    leaf1 →   leaf2 →  leaf3
+//
+// Steps:
+//   1. Find leaf for key 25 → leaf1 [10, 20, 25]
+//   2. Start at leaf1:
+//      - 10 < 25? skip
+//      - 20 < 25? skip
+//      - 25 >= 25 and 25 <= 45? collect
+//   3. Follow the Next link to leaf2 [30, 35]:
+//      - 30 >= 25 and 30 <= 45? collect
+//      - 35 >= 25 and 35 <= 45? collect
+//   4. Follow the Next link to leaf3 [40, 50]:
+//      - 40 >= 25 and 40 <= 45? collect
+//      - 50 <= 45? NO, stop
+//
+// Result: [25, 30, 35, 40]
 func (t *BTree) RangeScanKeys(min, max int) []int {
 	if t.Root == nil {
 		return nil
