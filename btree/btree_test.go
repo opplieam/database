@@ -134,3 +134,135 @@ func TestBTreeDeleteByTID(t *testing.T) {
 	removed = tree.DeleteByTID(storage.TID{PageId: 99, SlotId: 99})
 	assert.False(t, removed, "should return false for non-existent TID")
 }
+
+// collectLeafKeys walks the leaf chain from the leftmost leaf and returns the
+// keys of each leaf, in chain order.
+//
+// Example: leaves [10,20] -> [30,40] -> nil
+//
+//	collectLeafKeys(t, tree) == [][]int{{10, 20}, {30, 40}}
+func collectLeafKeys(t *testing.T, tree *BTree) [][]int {
+	t.Helper()
+
+	var leaves [][]int
+	seen := make(map[*BTreeNode]bool)
+	for leaf := tree.findLeftmostLeaf(); leaf != nil; leaf = leaf.Next {
+		if seen[leaf] {
+			t.Fatalf("leaf chain loops back to %v", leaf.Keys)
+		}
+		seen[leaf] = true
+		leaves = append(leaves, append([]int(nil), leaf.Keys...))
+	}
+	return leaves
+}
+
+// flattenLeafKeys concatenates per-leaf key slices into one key list.
+//
+// Example: [][]int{{10, 20}, {30}} -> []int{10, 20, 30}
+func flattenLeafKeys(leaves [][]int) []int {
+	var keys []int
+	for _, leaf := range leaves {
+		keys = append(keys, leaf...)
+	}
+	return keys
+}
+
+// TestBTreeSaveLoadPreservesLeafChain covers the part of the file format that
+// TestBTreePersistence cannot see: the Next pointer between leaves.
+//
+// Search only walks down from the root, so it still passes when every Next
+// pointer is nil after a load. RangeScanKeys follows the chain, so the range
+// checks below fail if LoadBTree did not rebuild it.
+//
+// Example: 12 keys with order 4 split into 6 leaves of 2 keys
+//
+//	[10,20] -> [30,40] -> [50,60] -> [70,80] -> [90,100] -> [110,120]
+func TestBTreeSaveLoadPreservesLeafChain(t *testing.T) {
+	tree := NewBTree()
+	for i := 1; i <= 12; i++ {
+		tree.Insert(i*10, storage.TID{PageId: 0, SlotId: uint16(i)})
+	}
+
+	before := collectLeafKeys(t, tree)
+	if len(before) < 2 {
+		t.Fatalf("expected several leaves, got %d: the chain is not exercised", len(before))
+	}
+
+	filename := "test_btree_chain.data"
+	defer os.Remove(filename)
+	assert.NoError(t, tree.Save(filename), "Save error")
+
+	loaded, err := LoadBTree(filename)
+	assert.NoError(t, err, "LoadBTree error")
+
+	// Same partition, not just the same keys: a lost Next shows up here.
+	assert.Equal(t, before, collectLeafKeys(t, loaded), "leaf partition changed by save/load")
+
+	// A range that starts mid-chain has to follow Next to finish.
+	assert.Equal(t, []int{40, 50, 60, 70, 80, 90}, loaded.RangeScanKeys(35, 95), "range scan over the loaded chain")
+	// The last leaf's Next must be nil, or the walk runs past the end.
+	assert.Equal(t, flattenLeafKeys(before), loaded.RangeScanKeys(0, 1000), "full range over the loaded chain")
+}
+
+// TestBTreeDeleteMergesIntoRightSibling drives the first leaf below the minimum
+// fill when it has no left neighbour and its right neighbour cannot spare a key.
+// handleUnderflow then falls through to mergeWithRight.
+//
+// Example: order 4, minimum 2 keys per leaf
+//
+//	before: [10,20] -> [30,40] -> [50,60] -> [70,80] -> [90,100] -> [110,120]
+//	delete 10
+//	after:  [20,30,40] -> [50,60] -> [70,80] -> [90,100] -> [110,120]
+func TestBTreeDeleteMergesIntoRightSibling(t *testing.T) {
+	tree := NewBTree()
+	for i := 1; i <= 12; i++ {
+		tree.Insert(i*10, storage.TID{PageId: 0, SlotId: uint16(i)})
+	}
+	before := collectLeafKeys(t, tree)
+
+	tree.Delete(10)
+
+	after := collectLeafKeys(t, tree)
+	assert.Len(t, after, len(before)-1, "merge removes exactly one leaf from the chain")
+
+	expected := []int{20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120}
+	assert.Equal(t, expected, flattenLeafKeys(after), "keys after merge")
+	assert.Equal(t, expected, tree.RangeScanKeys(0, 1000), "range scan after merge")
+
+	_, ok := tree.Search(10)
+	assert.False(t, ok, "Search(10) after delete: should not be found")
+	for _, key := range expected {
+		_, ok := tree.Search(key)
+		assert.True(t, ok, "Search(%d) after merge: should be found", key)
+	}
+}
+
+// TestBTreeDeleteBorrowsFromRightSibling drives the first leaf below the minimum
+// fill while its right neighbour holds a spare key, so handleUnderflow calls
+// borrowFromRight instead of merging. Nothing else in the suite reaches that
+// branch today.
+//
+// Example: order 4, minimum 2 keys per leaf
+//
+//	before: [10,20] -> [30,40,50]   parent key 30
+//	delete 10
+//	after:  [20,30] -> [40,50]      parent key 30 -> 40
+func TestBTreeDeleteBorrowsFromRightSibling(t *testing.T) {
+	tree := NewBTree()
+	for _, key := range []int{10, 20, 30, 40, 50} {
+		tree.Insert(key, storage.TID{PageId: 0, SlotId: uint16(key / 10)})
+	}
+
+	before := collectLeafKeys(t, tree)
+	tree.Delete(10)
+	after := collectLeafKeys(t, tree)
+
+	assert.Len(t, after, len(before), "borrowing keeps the leaf count")
+	assert.Equal(t, [][]int{{20, 30}, {40, 50}}, after, "keys after borrow")
+	assert.Equal(t, []int{20, 30, 40, 50}, tree.RangeScanKeys(0, 1000), "range scan after borrow")
+
+	// The TID has to travel with its key, not stay behind in the sibling.
+	tid, ok := tree.Search(30)
+	assert.True(t, ok, "Search(30) after borrow: should be found")
+	assert.Equal(t, storage.TID{PageId: 0, SlotId: 3}, tid, "Search(30) after borrow: TID mismatch")
+}
