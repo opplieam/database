@@ -1,6 +1,3 @@
-// Package backup takes base backups and rewinds a copy to a chosen
-// moment. A backup is a directory: the data, commit-log, and control
-// files as copied, plus a backup_label naming where replay starts.
 package backup
 
 import (
