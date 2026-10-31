@@ -794,27 +794,11 @@ func (t *BTree) borrowFromRight(node *BTreeNode, rightSibling *BTreeNode, parent
 //
 func (t *BTree) mergeWithLeft(node *BTreeNode, leftSibling *BTreeNode, parent *BTreeNode, siblingIdx int) {
 	if node.IsLeaf {
-		// merge leaf: combine keys and TIDs
-		leftSibling.Keys = append(leftSibling.Keys, node.Keys...)
-		leftSibling.TIDs = append(leftSibling.TIDs, node.TIDs...)
-		leftSibling.Next = node.Next
+		mergeLeafNodes(leftSibling, node)
 	} else {
-		// merge internal: combine keys and children
-		// push down parent key
-		parentKey := parent.Keys[siblingIdx]
-		leftSibling.Keys = append(leftSibling.Keys, parentKey)
-		leftSibling.Keys = append(leftSibling.Keys, node.Keys...)
-		leftSibling.Children = append(leftSibling.Children, node.Children...)
+		mergeInternalNodes(leftSibling, node, parent.Keys[siblingIdx])
 	}
-
-	// remove key and child from parent
-	parent.Keys = append(parent.Keys[:siblingIdx], parent.Keys[siblingIdx+1:]...)
-	parent.Children = append(parent.Children[:siblingIdx+1], parent.Children[siblingIdx+2:]...)
-
-	// check parent underflow
-	if parent.IsUnderflow() && parent != t.Root {
-		t.handleUnderflow(parent)
-	}
+	t.removeSiblingFromParent(parent, siblingIdx)
 }
 
 // mergeWithRight merges node with its right sibling.
@@ -831,23 +815,47 @@ func (t *BTree) mergeWithLeft(node *BTreeNode, leftSibling *BTreeNode, parent *B
 //
 func (t *BTree) mergeWithRight(node *BTreeNode, rightSibling *BTreeNode, parent *BTreeNode, siblingIdx int) {
 	if node.IsLeaf {
-		// merge leaf
-		node.Keys = append(node.Keys, rightSibling.Keys...)
-		node.TIDs = append(node.TIDs, rightSibling.TIDs...)
-		node.Next = rightSibling.Next
+		mergeLeafNodes(node, rightSibling)
 	} else {
-		// merge internal
-		parentKey := parent.Keys[siblingIdx]
-		node.Keys = append(node.Keys, parentKey)
-		node.Keys = append(node.Keys, rightSibling.Keys...)
-		node.Children = append(node.Children, rightSibling.Children...)
+		mergeInternalNodes(node, rightSibling, parent.Keys[siblingIdx])
 	}
+	t.removeSiblingFromParent(parent, siblingIdx)
+}
 
-	// remove key and child from parent
-	parent.Keys = append(parent.Keys[:siblingIdx], parent.Keys[siblingIdx+1:]...)
-	parent.Children = append(parent.Children[:siblingIdx+1], parent.Children[siblingIdx+2:]...)
+// mergeLeafNodes appends right's keys and TIDs to left. The leaf chain stays
+// intact because left takes over whatever right pointed at.
+//
+// Example: left [10,20], right [30,40] -> left [10,20,30,40]
+func mergeLeafNodes(left, right *BTreeNode) {
+	left.Keys = append(left.Keys, right.Keys...)
+	left.TIDs = append(left.TIDs, right.TIDs...)
+	left.Next = right.Next
+}
 
-	// check parent underflow
+// mergeInternalNodes appends right's keys and children to left, preceded by the
+// separator key that used to divide them in the parent.
+//
+// Example: left [30] (children A,B), right [60] (children C,D), separator 40
+//
+//	-> left [30,40,60] with children A,B,C,D
+func mergeInternalNodes(left, right *BTreeNode, separator int) {
+	left.Keys = append(left.Keys, separator)
+	left.Keys = append(left.Keys, right.Keys...)
+	left.Children = append(left.Children, right.Children...)
+}
+
+// removeSiblingFromParent drops the separator key that divided the two merged
+// nodes, plus the child that was absorbed, then repairs the parent if it is now
+// too empty.
+//
+// Example: parent.Keys=[35,40], parent.Children=[[10,30],[35],[40,50]],
+// separatorIdx=0 with Children[1] absorbed into Children[0]
+//
+//	-> parent.Keys=[40], parent.Children=[[10,30,35],[40,50]]
+func (t *BTree) removeSiblingFromParent(parent *BTreeNode, separatorIdx int) {
+	parent.Keys = append(parent.Keys[:separatorIdx], parent.Keys[separatorIdx+1:]...)
+	parent.Children = append(parent.Children[:separatorIdx+1], parent.Children[separatorIdx+2:]...)
+
 	if parent.IsUnderflow() && parent != t.Root {
 		t.handleUnderflow(parent)
 	}
