@@ -32,6 +32,23 @@ import (
 //   - Split when node has N keys
 const BTreeNodeOrder = 4
 
+// File format constants for Save and LoadBTree.
+const (
+	// btreeMagic opens every saved tree file. Save and LoadBTree share it so
+	// the two literals cannot drift apart.
+	btreeMagic = "BTREE"
+
+	// noNextLeaf fills the next-leaf field of the last leaf in the chain.
+	// It is typed and far above any real node index, so LoadBTree's
+	// nextID < nodeCount check reads it as "no next leaf" without a branch.
+	// Example: [110,120] is the last leaf -> its next field holds noNextLeaf.
+	noNextLeaf uint32 = 0xFFFFFFFF
+
+	// tidSize is the encoded width of one TID: 4 bytes PageId, 2 bytes
+	// SlotId, 2 bytes padding.
+	tidSize = 8
+)
+
 // BTreeNode represents a node in the B+ tree.
 //
 // Internal node:
@@ -958,7 +975,7 @@ func (t *BTree) Save(path string) error {
 	defer f.Close()
 
 	// write magic bytes
-	if _, err := f.Write([]byte("BTREE")); err != nil {
+	if _, err := f.Write([]byte(btreeMagic)); err != nil {
 		return err
 	}
 
@@ -1014,10 +1031,10 @@ func (t *BTree) Save(path string) error {
 //
 //	node0: internal, keys=[30], children=[1,2]
 //	node1: leaf, keys=[10,20], next=2, TIDs=[...]
-//	node2: leaf, keys=[30,40], next=0xFFFFFFFF, TIDs=[...]
+//	node2: leaf, keys=[30,40], next=noNextLeaf, TIDs=[...]
 //
 // After loop 2: nodes[0].Children = [nodes[1], nodes[2]] and
-// nodes[1].Next = nodes[2]. The 0xFFFFFFFF is >= the node count, so nodes[2]
+// nodes[1].Next = nodes[2]. noNextLeaf is >= the node count, so nodes[2]
 // keeps Next == nil and the chain ends there.
 func LoadBTree(path string) (*BTree, error) {
 	f, err := os.Open(path)
@@ -1027,11 +1044,11 @@ func LoadBTree(path string) (*BTree, error) {
 	defer f.Close()
 
 	// read magic bytes
-	magic := make([]byte, 5)
+	magic := make([]byte, len(btreeMagic))
 	if _, err := io.ReadFull(f, magic); err != nil {
 		return nil, err
 	}
-	if string(magic) != "BTREE" {
+	if string(magic) != btreeMagic {
 		return nil, errors.New("invalid file format")
 	}
 
@@ -1125,7 +1142,7 @@ func writeNodeWithIDs(f *os.File, node *BTreeNode, nodeIDs map[*BTreeNode]uint32
 				return err
 			}
 		} else {
-			if err := binary.Write(f, binary.LittleEndian, uint32(0xFFFFFFFF)); err != nil {
+			if err := binary.Write(f, binary.LittleEndian, noNextLeaf); err != nil {
 				return err
 			}
 		}
@@ -1163,7 +1180,7 @@ func readNodeWithIDs(f *os.File) (*BTreeNode, []uint32, uint32, error) {
 	if node.IsLeaf {
 		node.TIDs = make([]storage.TID, keyCount)
 		for i := uint16(0); i < keyCount; i++ {
-			tidBytes := make([]byte, 8)
+			tidBytes := make([]byte, tidSize)
 			if _, err := io.ReadFull(f, tidBytes); err != nil {
 				return nil, nil, 0, err
 			}
@@ -1219,7 +1236,7 @@ func decodeTuple(data []byte) storage.Tuple {
 
 // encodeTID encodes a TID to bytes (8 bytes: 4 for PageId + 2 for SlotId + 2 padding).
 func encodeTID(tid storage.TID) []byte {
-	buf := make([]byte, 8)
+	buf := make([]byte, tidSize)
 	binary.LittleEndian.PutUint32(buf[0:4], tid.PageId)
 	binary.LittleEndian.PutUint16(buf[4:6], tid.SlotId)
 	return buf
