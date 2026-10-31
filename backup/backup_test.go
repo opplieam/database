@@ -140,6 +140,60 @@ func TestBackupRefusesFinishedOutDir(t *testing.T) {
 	assert.Equal(t, want, got, "refused write must not disturb the first backup")
 }
 
+// A copy is trusted only once it is on disk, so copyFile syncs before
+// it closes. Reading the bytes back proves the whole file arrived, not
+// merely that io.Copy returned.
+func TestCopyFileCopiesBytes(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "dst")
+	want := []byte("movie id,title\n1,Toy Story\n")
+	require.NoError(t, os.WriteFile(src, want, 0644))
+
+	require.NoError(t, copyFile(src, dst))
+
+	got, err := os.ReadFile(dst)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+}
+
+// An unreadable source stops the copy before the destination exists:
+// os.Open runs before os.Create, so a failed step leaves no stray
+// empty file claiming to be a copy of something.
+func TestCopyFileMissingSourceCreatesNoDest(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "dst")
+
+	assert.Error(t, copyFile(filepath.Join(dir, "absent"), dst))
+	assert.NoFileExists(t, dst)
+}
+
+// A destination that cannot be created fails the copy rather than
+// reporting success with nothing written.
+func TestCopyFileUnwritableDestFails(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	require.NoError(t, os.WriteFile(src, []byte("x"), 0644))
+	dst := filepath.Join(dir, "missing-dir", "dst")
+
+	assert.Error(t, copyFile(src, dst))
+}
+
+// A read failure part-way through returns an error and leaves the
+// partial destination behind, which is the documented contract: the
+// label, not this file, decides whether a backup is complete. A
+// directory is the portable way to fail the read, since opening one
+// succeeds and reading it does not.
+func TestCopyFileReadFailureLeavesPartialDest(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "srcdir")
+	require.NoError(t, os.MkdirAll(src, 0755))
+	dst := filepath.Join(dir, "dst")
+
+	assert.Error(t, copyFile(src, dst))
+	assert.FileExists(t, dst, "a partial file is expected; the label marks completion")
+}
+
 // A directory with leftovers but no label is not a backup: a retry
 // after a failed copy proceeds and overwrites.
 func TestBackupAllowsPartialOutDir(t *testing.T) {
