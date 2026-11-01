@@ -85,23 +85,28 @@ func Backup(c Cluster, outDir string, flusher wal.Flusher,
 // a backup that vanishes with the process that made it is no backup.
 // A partial file under dst is expected: the label, not this file,
 // tells whether the directory holds a complete one.
-func copyFile(src, dst string) error {
+func copyFile(src, dst string) (err error) {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
+
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
+	// One close for every exit out of the body below. It reports
+	// only when nothing else failed, because the first error is the
+	// one that explains the failure.
+	defer func() {
+		if cerr := out.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+
+	if _, cerr := io.Copy(out, in); cerr != nil {
+		return cerr
 	}
-	if err := out.Sync(); err != nil {
-		out.Close()
-		return err
-	}
-	return out.Close()
+	return out.Sync()
 }
