@@ -267,23 +267,32 @@ func (p *BufferPool) findVictim() (int, error) {
 		cand := &p.slots[p.nextVictim]
 		// Free slot: take it, no eviction needed.
 		if !cand.desc.Valid {
-			idx := p.nextVictim
-			p.nextVictim = (p.nextVictim + 1) % len(p.slots)
-			return idx, nil
+			return p.take(), nil
 		}
 		// Pinned slots are invisible to the sweep; only unpinned ones cool down.
 		if cand.desc.PinCount == 0 {
 			// First unpinned slot cooled to zero wins.
 			if cand.desc.UsageCount == 0 {
-				idx := p.nextVictim
-				p.nextVictim = (p.nextVictim + 1) % len(p.slots)
-				return idx, nil
+				return p.take(), nil
 			}
 			cand.desc.UsageCount--
 		}
-		p.nextVictim = (p.nextVictim + 1) % len(p.slots)
+		p.advance()
 	}
 	return 0, errors.New("buffer: all slots pinned, no victim available")
+}
+
+// take hands out the slot under the hand and advances past it, so the next
+// sweep starts at a different slot instead of re-examining this one.
+func (p *BufferPool) take() int {
+	idx := p.nextVictim
+	p.advance()
+	return idx
+}
+
+// advance moves the sweep hand one slot on, wrapping at the end.
+func (p *BufferPool) advance() {
+	p.nextVictim = (p.nextVictim + 1) % len(p.slots)
 }
 
 // flushSlot writes the slot's page if dirty and valid, then clears dirty.
