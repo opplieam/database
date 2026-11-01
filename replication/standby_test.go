@@ -204,3 +204,50 @@ func TestCatchUpNoNewRecordsIsStreaming(t *testing.T) {
 	require.Len(t, rows, 3)
 	assert.Equal(t, "Carol", rows[2][1])
 }
+
+// A primary whose log ends before the point the standby already reached
+// cannot supply the missing bytes. Send refuses an offset past the end,
+// so the link reports it rather than claiming a clean no-op.
+func TestCatchUpRefusesPrimaryBehind(t *testing.T) {
+	_, _, _, _, _, _, st := bootstrapScene(t)
+	from := st.seg.End()
+	require.Greater(t, from, wal.LSN(wal.SegmentHeaderSize),
+		"the standby must have replayed past its header, or this tests nothing")
+
+	// A fresh segment holds only its header, so its tip sits below the
+	// standby's.
+	behind, err := wal.Open(filepath.Join(t.TempDir(), "behind.wal"))
+	require.NoError(t, err)
+	defer behind.Close()
+
+	_, err = st.CatchUp(behind)
+	assert.Error(t, err)
+}
+
+// A standby pointed at a primary that does not share its past cannot
+// splice that log onto its own. Receive validates the whole payload
+// before writing any of it, so the refusal leaves the standby's log
+// exactly where it was.
+//
+// Which guard fires depends on where the offset lands: here the bytes
+// are not even a record stream the standby can continue, so decodeAt
+// rejects them before the chain check would. Both say the same thing,
+// that the two logs do not share a past.
+func TestCatchUpRefusesUnrelatedPrimary(t *testing.T) {
+	_, _, _, _, _, _, st := bootstrapScene(t)
+	from := st.seg.End()
+
+	// A second cluster whose own log runs past that offset: the same
+	// LSN range as the first cluster's, a different history.
+	other, opool, oseg, oclog, omgr := newCluster(t, filepath.Join(t.TempDir(), "other"))
+	for i := 0; i < 16 && oseg.End() <= from; i++ {
+		insertPooled(t, other.Data, opool, oclog, omgr, storage.MovieRecord{
+			MovieId: uint32(i + 100), Title: "Other", Genres: "Genre",
+		})
+	}
+	require.Greater(t, oseg.End(), from, "the second log must reach past the standby's tip")
+
+	_, err := st.CatchUp(oseg)
+	assert.Error(t, err)
+	assert.Equal(t, from, st.seg.End(), "a refused payload must leave the standby's log untouched")
+}
