@@ -150,6 +150,50 @@ func TestInsertRecord(t *testing.T) {
 	assert.Equal(t, "", movies3[2].Title, "NULL title should be empty")
 }
 
+// When no page has room, InsertRecord appends a page instead of failing.
+//
+// The append branch only runs when the FSM says no page fits, so page 0 is
+// left nearly full and the .fsm is deliberately absent: InsertRecord rebuilds
+// the map from page 0's real free space, finds no fit, and appends page 1.
+func TestInsertRecordAppendsPageWhenNoPageFits(t *testing.T) {
+	filename := filepath.Join(t.TempDir(), "append_page.data")
+
+	// A 4000-byte record leaves page 0 with GetFreeSpace() == 75.
+	file, err := Create(filename)
+	require.NoError(t, err)
+	full := NewPage(0)
+	require.True(t, full.AddRecord(make([]byte, 4000), 0))
+	require.NoError(t, file.AppendPage(full))
+	require.NoError(t, file.Close())
+
+	_, err = os.Stat(filename + ".fsm")
+	assert.True(t, os.IsNotExist(err), "FSM must be absent so InsertRecord bootstraps it")
+
+	// 100 bytes plus the 5 metadata bytes AddRecord needs exceed 75, so the
+	// FSM reports no page with room.
+	record := make([]byte, 100)
+	require.NoError(t, InsertRecord(filename, record, 0))
+
+	file, err = Open(filename)
+	require.NoError(t, err)
+	defer file.Close()
+	assert.Equal(t, uint32(2), file.PageCount())
+
+	page, err := file.ReadPage(1)
+	require.NoError(t, err)
+	assert.Equal(t, uint16(1), page.Header.RecordCount)
+
+	got, err := page.GetRecord(0)
+	require.NoError(t, err)
+	assert.Equal(t, record, got, "the record should land on the appended page")
+
+	fsm, err := OpenFSM(filename + ".fsm")
+	require.NoError(t, err)
+	defer fsm.Close()
+	assert.Equal(t, uint32(2), fsm.PageCount(), "the appended page must be tracked")
+	assert.Equal(t, uint16(page.GetFreeSpace()), fsm.Get(1))
+}
+
 func TestInsertRecordRejectsUnfitRecord(t *testing.T) {
 	// An empty page has 4080 bytes free. The FSM check sees this 4076-byte
 	// record as fitting, but AddRecord also needs 5 bytes of page metadata.
