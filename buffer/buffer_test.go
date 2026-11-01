@@ -193,3 +193,49 @@ func TestUnpinErrors(t *testing.T) {
 	assert.Error(t, p.MarkDirty(unknown), "dirty of unknown page")
 	assert.Error(t, p.Flush(unknown), "flush of unknown page")
 }
+
+// PinnedCount is the leak detector the scan tests rely on, so it has to see
+// a pin, not merely agree that nothing is pinned. Every other assertion of it
+// in the repo is zero, which a counter hard-wired to 0 would satisfy too.
+func TestPinnedCountTracksAPin(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "movies.data")
+	makeHeapFile(t, path, []string{"Toy Story"})
+
+	p := NewBufferPool(1)
+	tag := BufferTag{Path: path, PageId: 0}
+
+	assert.Equal(t, 0, p.PinnedCount(), "a fresh pool holds no pins")
+
+	_, err := p.Get(tag)
+	require.NoError(t, err)
+	assert.Equal(t, 1, p.PinnedCount(), "Get pins the page it returns")
+
+	require.NoError(t, p.Unpin(tag))
+	assert.Equal(t, 0, p.PinnedCount(), "Unpin releases the pin")
+}
+
+// The documented floor is one slot. A size below it must still give a pool
+// that can load a page, not one where every miss fails for want of a slot.
+func TestNewBufferPoolClampsToMinimumOne(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		size int
+	}{
+		{"zero", 0},
+		{"negative", -3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "movies.data")
+			makeHeapFile(t, path, []string{"Toy Story"})
+
+			p := NewBufferPool(tc.size)
+			require.Len(t, p.slots, 1, "the minimum slot count is one")
+
+			tag := BufferTag{Path: path, PageId: 0}
+			page, err := p.Get(tag)
+			require.NoError(t, err)
+			require.NotNil(t, page)
+			require.NoError(t, p.Unpin(tag))
+		})
+	}
+}
