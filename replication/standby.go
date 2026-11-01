@@ -28,6 +28,12 @@ const (
 	StateStreaming = "streaming"
 )
 
+// standbyPoolSize sizes the pool a standby replays through. Unlike
+// backup's restore pool, which is throwaway, this one lives in Standby:
+// every CatchUp reuses it and its pages survive between calls until
+// Close flushes them.
+const standbyPoolSize = 4
+
 // Standby is a cluster that follows a primary: its own copies of the
 // files, plus the handles catch-up needs open.
 type Standby struct {
@@ -63,7 +69,7 @@ func Bootstrap(c backup.Cluster, backupDir string,
 	return &Standby{
 		Cluster: c,
 		seg:     seg,
-		pool:    buffer.NewBufferPool(4),
+		pool:    buffer.NewBufferPool(standbyPoolSize),
 		clog:    clog,
 	}, nil
 }
