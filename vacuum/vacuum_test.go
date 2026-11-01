@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"database/btree"
 	"database/storage"
 	"database/tx"
-	"database/btree"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -271,23 +271,23 @@ func TestShouldFreeze(t *testing.T) {
 
 func TestScanHeap(t *testing.T) {
 	tests := []struct {
-		name            string
-		records         []storage.TxRecord
-		committed       []uint64
-		xipList         map[uint64]bool
-		currentTxID     uint64
-		freezeMaxAge    uint64
-		expectedDead    int
-		expectedFrozen  int
+		name           string
+		records        []storage.TxRecord
+		committed      []uint64
+		xipList        map[uint64]bool
+		currentTxID    uint64
+		freezeMaxAge   uint64
+		expectedDead   int
+		expectedFrozen int
 	}{
 		{
-			name:         "EmptyFile",
-			records:      []storage.TxRecord{},
-			committed:    []uint64{},
-			xipList:      map[uint64]bool{},
-			currentTxID:  100,
-			freezeMaxAge: 50,
-			expectedDead: 0,
+			name:           "EmptyFile",
+			records:        []storage.TxRecord{},
+			committed:      []uint64{},
+			xipList:        map[uint64]bool{},
+			currentTxID:    100,
+			freezeMaxAge:   50,
+			expectedDead:   0,
 			expectedFrozen: 0,
 		},
 		{
@@ -297,11 +297,11 @@ func TestScanHeap(t *testing.T) {
 				{TxMin: 2, TxMax: 0, CID: 0},
 				{TxMin: 3, TxMax: 0, CID: 0},
 			},
-			committed:    []uint64{1, 2, 3},
-			xipList:      map[uint64]bool{},
-			currentTxID:  100,
-			freezeMaxAge: 10,
-			expectedDead: 0,
+			committed:      []uint64{1, 2, 3},
+			xipList:        map[uint64]bool{},
+			currentTxID:    100,
+			freezeMaxAge:   10,
+			expectedDead:   0,
 			expectedFrozen: 3,
 		},
 		{
@@ -312,11 +312,11 @@ func TestScanHeap(t *testing.T) {
 				{TxMin: 4, TxMax: 0, CID: 0},
 				{TxMin: 5, TxMax: 6, CID: 0},
 			},
-			committed:    []uint64{1, 2, 3, 4, 5, 6},
-			xipList:      map[uint64]bool{},
-			currentTxID:  100,
-			freezeMaxAge: 10,
-			expectedDead: 2,
+			committed:      []uint64{1, 2, 3, 4, 5, 6},
+			xipList:        map[uint64]bool{},
+			currentTxID:    100,
+			freezeMaxAge:   10,
+			expectedDead:   2,
 			expectedFrozen: 2,
 		},
 		{
@@ -324,11 +324,11 @@ func TestScanHeap(t *testing.T) {
 			records: []storage.TxRecord{
 				{TxMin: 1, TxMax: 2, CID: 0},
 			},
-			committed:    []uint64{1, 2},
-			xipList:      map[uint64]bool{},
-			currentTxID:  100,
-			freezeMaxAge: 50,
-			expectedDead: 1,
+			committed:      []uint64{1, 2},
+			xipList:        map[uint64]bool{},
+			currentTxID:    100,
+			freezeMaxAge:   50,
+			expectedDead:   1,
 			expectedFrozen: 0,
 		},
 		{
@@ -336,11 +336,11 @@ func TestScanHeap(t *testing.T) {
 			records: []storage.TxRecord{
 				{TxMin: 1, TxMax: 2, CID: 0},
 			},
-			committed:    []uint64{1, 2},
-			xipList:      map[uint64]bool{2: true},
-			currentTxID:  100,
-			freezeMaxAge: 50,
-			expectedDead: 0,
+			committed:      []uint64{1, 2},
+			xipList:        map[uint64]bool{2: true},
+			currentTxID:    100,
+			freezeMaxAge:   50,
+			expectedDead:   0,
 			expectedFrozen: 1,
 		},
 		{
@@ -378,11 +378,11 @@ func TestScanHeap(t *testing.T) {
 				{TxMin: 8, TxMax: 9, CID: 0},
 				{TxMin: 10, TxMax: 0, CID: 0},
 			},
-			committed:    []uint64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
-			xipList:      map[uint64]bool{},
-			currentTxID:  10,
-			freezeMaxAge: 3,
-			expectedDead: 3,
+			committed:      []uint64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+			xipList:        map[uint64]bool{},
+			currentTxID:    10,
+			freezeMaxAge:   3,
+			expectedDead:   3,
 			expectedFrozen: 2,
 		},
 	}
@@ -577,11 +577,11 @@ func TestApplyFreezes_SkipDeadSlots(t *testing.T) {
 func TestFullVacuumFlow(t *testing.T) {
 	// Setup - create 5 records (5 pages, each with 1 record)
 	records := []storage.TxRecord{
-		{TxMin: 1, TxMax: 0, CID: 0},  // page 0, alive, old → freeze
-		{TxMin: 2, TxMax: 3, CID: 0},  // page 1, dead (tx 3 committed)
-		{TxMin: 4, TxMax: 0, CID: 0},  // page 2, alive, old → freeze
-		{TxMin: 5, TxMax: 6, CID: 0},  // page 3, dead (tx 6 committed)
-		{TxMin: 7, TxMax: 0, CID: 0},  // page 4, alive, new → don't freeze
+		{TxMin: 1, TxMax: 0, CID: 0}, // page 0, alive, old → freeze
+		{TxMin: 2, TxMax: 3, CID: 0}, // page 1, dead (tx 3 committed)
+		{TxMin: 4, TxMax: 0, CID: 0}, // page 2, alive, old → freeze
+		{TxMin: 5, TxMax: 6, CID: 0}, // page 3, dead (tx 6 committed)
+		{TxMin: 7, TxMax: 0, CID: 0}, // page 4, alive, new → don't freeze
 	}
 	createTestHeapFile(t, "test_vacuum.db", records)
 	defer os.Remove("test_vacuum.db")
@@ -656,7 +656,7 @@ func TestVacuumIndexes(t *testing.T) {
 		wantRemaining []int
 	}{
 		{
-			name: "Remove dead index entries",
+			name:     "Remove dead index entries",
 			treeKeys: []int{100, 200, 300, 400},
 			treeTIDs: []storage.TID{
 				{PageId: 0, SlotId: 1},
@@ -672,7 +672,7 @@ func TestVacuumIndexes(t *testing.T) {
 			wantRemaining: []int{100, 300},
 		},
 		{
-			name: "TID not in index",
+			name:     "TID not in index",
 			treeKeys: []int{100, 200},
 			treeTIDs: []storage.TID{
 				{PageId: 0, SlotId: 0},
@@ -693,7 +693,7 @@ func TestVacuumIndexes(t *testing.T) {
 			wantRemaining: []int{},
 		},
 		{
-			name: "Multiple dead TIDs",
+			name:     "Multiple dead TIDs",
 			treeKeys: []int{10, 20, 30},
 			treeTIDs: []storage.TID{
 				{PageId: 0, SlotId: 0},
@@ -708,7 +708,7 @@ func TestVacuumIndexes(t *testing.T) {
 			wantRemaining: []int{20},
 		},
 		{
-			name: "All entries dead",
+			name:     "All entries dead",
 			treeKeys: []int{100, 200},
 			treeTIDs: []storage.TID{
 				{PageId: 0, SlotId: 0},

@@ -96,5 +96,5 @@ func TestCostTracker_CacheHitVsMiss(t *testing.T) {
 
 	stats := tracker.Stats()
 	assert.Equal(t, 110, stats.TotalCost) // 10 + 100
-	assert.Equal(t, 1, stats.TotalPauses)  // Only once (at 100)
+	assert.Equal(t, 1, stats.TotalPauses) // Only once (at 100)
 }

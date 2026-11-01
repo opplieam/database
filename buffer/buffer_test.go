@@ -80,14 +80,14 @@ func TestClockSweep(t *testing.T) {
 			name:      "pinned slots skipped",
 			pins:      []int{2, 0},
 			usages:    []int{0, 5},
-			wantVict:  1, // slot 0 pinned despite zero usage
+			wantVict:  1,           // slot 0 pinned despite zero usage
 			wantUsage: []int{0, 0}, // decayed 5 -> 0 over rotations
 		},
 		{
-			name:     "all pinned errors",
-			pins:     []int{1, 3},
-			usages:   []int{0, 0},
-			wantErr:  true,
+			name:    "all pinned errors",
+			pins:    []int{1, 3},
+			usages:  []int{0, 0},
+			wantErr: true,
 		},
 	}
 

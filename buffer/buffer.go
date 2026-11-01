@@ -245,14 +245,15 @@ func (p *BufferPool) PinnedCount() int {
 // findVictim runs clock sweep to pick a slot for reuse.
 //
 // Algorithm: walk slots in a circle from the hand, and per slot:
-//   1. Free slot -> take it, no eviction.
-//   2. Pinned slot -> skip, usage untouched.
-//   3. Unpinned slot with usage above zero -> decay by one, move on.
-//   4. Unpinned slot at zero -> victim.
+//  1. Free slot -> take it, no eviction.
+//  2. Pinned slot -> skip, usage untouched.
+//  3. Unpinned slot with usage above zero -> decay by one, move on.
+//  4. Unpinned slot at zero -> victim.
 //
 // Example:
-//   usages [2, 0], hand at 0 -> decay slot 0 to 1, take slot 1
-//   all slots pinned -> error, caller must Unpin first
+//
+//	usages [2, 0], hand at 0 -> decay slot 0 to 1, take slot 1
+//	all slots pinned -> error, caller must Unpin first
 //
 // The walk always ends: each idle slot needs at most 15 decays, so the
 // loop bound covers every case including all-pinned.

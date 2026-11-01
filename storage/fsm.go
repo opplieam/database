@@ -9,17 +9,18 @@ import (
 // FreeSpaceMap tracks free space per page for fast INSERT operations.
 //
 // File format:
-//   [4 bytes] page count (uint32, little-endian)
-//   [2 bytes] page 0 free space (uint16)
-//   [2 bytes] page 1 free space (uint16)
-//   ...
+//
+//	[4 bytes] page count (uint32, little-endian)
+//	[2 bytes] page 0 free space (uint16)
+//	[2 bytes] page 1 free space (uint16)
+//	...
 //
 // Without FSM: INSERT scans all pages O(n)
 // With FSM: INSERT does O(1) lookup
 type FreeSpaceMap struct {
 	file      *os.File
 	path      string
-	freeSpace []uint16  // index = pageId, value = free bytes
+	freeSpace []uint16 // index = pageId, value = free bytes
 }
 
 // OpenFSM opens an existing FSM file.

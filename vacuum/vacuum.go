@@ -50,9 +50,10 @@ package vacuum
 
 import (
 	"fmt"
+
+	"database/btree"
 	"database/storage"
 	"database/tx"
-	"database/btree"
 )
 
 // ScanResult holds the results of scanning a heap file.
@@ -64,17 +65,17 @@ type ScanResult struct {
 // FrozenTuple represents a tuple that needs to be frozen.
 // Only LIVE tuples are frozen (dead tuples are removed by VACUUM).
 type FrozenTuple struct {
-	TID    storage.TID              // Where the tuple is (page + slot)
-	OldMin uint64                   // Original TxMin value (before freezing)
+	TID    storage.TID // Where the tuple is (page + slot)
+	OldMin uint64      // Original TxMin value (before freezing)
 }
 
 // VacuumStats holds statistics about a VACUUM operation.
 type VacuumStats struct {
-	DeadTuples    int  // Number of dead tuples found
-	FrozenTuples  int  // Number of tuples frozen
-	IndexEntries  int  // Number of index entries removed
-	PagesModified int  // Number of pages modified
-	PurgedRecords int  // Commit-log marks dropped after freezing
+	DeadTuples    int // Number of dead tuples found
+	FrozenTuples  int // Number of tuples frozen
+	IndexEntries  int // Number of index entries removed
+	PagesModified int // Number of pages modified
+	PurgedRecords int // Commit-log marks dropped after freezing
 }
 
 // ScanHeap scans a heap file to find dead tuples and tuples to freeze.
@@ -89,9 +90,10 @@ type VacuumStats struct {
 //   - Tuples older than freezeMaxAge get frozen to prevent wraparound
 //
 // Example:
-//   currentTxID = 150000000
-//   freezeMaxAge = 100000000 (100M)
-//   Tuples more than 100M transactions behind currentTxID are frozen
+//
+//	currentTxID = 150000000
+//	freezeMaxAge = 100000000 (100M)
+//	Tuples more than 100M transactions behind currentTxID are frozen
 func ScanHeap(filename string, clog *tx.CommitLog, xipList map[uint64]bool, currentTxID uint64, freezeMaxAge uint64) (*ScanResult, error) {
 	file, err := storage.Open(filename)
 	if err != nil {
@@ -381,11 +383,11 @@ func updateFSM(filename string, deadTIDs []storage.TID, fsmPath string) error {
 // Vacuum performs a complete VACUUM operation.
 //
 // This is the main entry point for VACUUM. It orchestrates all phases:
-//   1. ScanHeap - find dead tuples and tuples to freeze
-//   2. ApplyFreezes - update old tuples to prevent wraparound
-//   3. VacuumIndexes - remove orphaned index entries
-//   4. VacuumHeap - mark dead tuples and update FSM
-//   5. Purge - drop commit marks older than the freeze window
+//  1. ScanHeap - find dead tuples and tuples to freeze
+//  2. ApplyFreezes - update old tuples to prevent wraparound
+//  3. VacuumIndexes - remove orphaned index entries
+//  4. VacuumHeap - mark dead tuples and update FSM
+//  5. Purge - drop commit marks older than the freeze window
 //
 // Parameters:
 //   - filename: path to heap file

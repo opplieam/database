@@ -56,6 +56,7 @@ const (
 //	[13-20] prev_lsn: LSN of previous record (log chain link)
 //	[21..]  payload (tot_len - 25 bytes)
 //	[last 4] crc32: checksum over every byte before it
+//
 // Record header fields occupy 21 bytes; with the trailing checksum the
 // smallest record (empty payload) is RecordHeaderSize bytes.
 const (

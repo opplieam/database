@@ -51,9 +51,9 @@ type Page struct {
 func NewPage(pageId uint32) *Page {
 	return &Page{
 		Header: PageHeader{
-			PageId:     pageId,
+			PageId:      pageId,
 			RecordCount: 0,
-			FreeOffset: 16, // after header
+			FreeOffset:  16, // after header
 		},
 		LinePointers: nil,
 		Records:      nil,
@@ -65,22 +65,25 @@ func NewPage(pageId uint32) *Page {
 // Example: adding record with nullBitmap = 2 (0b010 = title is NULL)
 //
 // Before:
-//   FreeOffset = 16 (just header)
-//   Records = empty
+//
+//	FreeOffset = 16 (just header)
+//	Records = empty
 //
 // After:
-//   FreeOffset = 21 (16 + 4 line pointer + 1 null bitmap)
-//   LinePointers = [{offset:4074, length:22}]
-//   NullBitmaps = [2]
-//   Records = [22 bytes of record data]
+//
+//	FreeOffset = 21 (16 + 4 line pointer + 1 null bitmap)
+//	LinePointers = [{offset:4074, length:22}]
+//	NullBitmaps = [2]
+//	Records = [22 bytes of record data]
 //
 // The null bitmap tells us which columns are NULL:
-//   bit 0 = movieId NULL
-//   bit 1 = title NULL
-//   bit 2 = genres NULL
+//
+//	bit 0 = movieId NULL
+//	bit 1 = title NULL
+//	bit 2 = genres NULL
 func (p *Page) AddRecord(record []byte, nullBitmap uint8) bool {
 	recordLen := len(record)
-	linePtrSize := 4     // each line pointer is 4 bytes (offset + length)
+	linePtrSize := 4    // each line pointer is 4 bytes (offset + length)
 	nullBitmapSize := 1 // 1 byte for null bitmap
 
 	// Reject early so the uint16 casts below cannot wrap or underflow.
@@ -128,18 +131,21 @@ func (p *Page) GetNullBitmap(index int) (uint8, error) {
 // column is 0-indexed.
 //
 // Example: nullBitmap = 0b010 (decimal 2)
-//   IsNull(nullBitmap, 0) → bit 0 = 0 → false (movieId not NULL)
-//   IsNull(nullBitmap, 1) → bit 1 = 1 → true  (title IS NULL)
-//   IsNull(nullBitmap, 2) → bit 2 = 0 → false (genres not NULL)
+//
+//	IsNull(nullBitmap, 0) → bit 0 = 0 → false (movieId not NULL)
+//	IsNull(nullBitmap, 1) → bit 1 = 1 → true  (title IS NULL)
+//	IsNull(nullBitmap, 2) → bit 2 = 0 → false (genres not NULL)
 //
 // How the check works:
-//   1 << column creates a mask: column 0 → 0b001, column 1 → 0b010, column 2 → 0b100
-//   nullBitmap & mask: if result != 0, that bit is set → column is NULL
+//
+//	1 << column creates a mask: column 0 → 0b001, column 1 → 0b010, column 2 → 0b100
+//	nullBitmap & mask: if result != 0, that bit is set → column is NULL
 //
 // Example for column 1 (title):
-//   nullBitmap = 0b010
-//   mask = 1 << 1 = 0b010
-//   0b010 & 0b010 = 0b010 ≠ 0 → true (NULL)
+//
+//	nullBitmap = 0b010
+//	mask = 1 << 1 = 0b010
+//	0b010 & 0b010 = 0b010 ≠ 0 → true (NULL)
 func IsNull(nullBitmap uint8, column int) bool {
 	return nullBitmap&(1<<uint(column)) != 0
 }
@@ -152,31 +158,35 @@ func IsNull(nullBitmap uint8, column int) bool {
 //   - the record itself (recordLen bytes)
 //
 // Layout grows from both ends:
-//   Line pointers + null bitmaps → grow forward from offset 16
-//   Records → grow backward from offset 4096
+//
+//	Line pointers + null bitmaps → grow forward from offset 16
+//	Records → grow backward from offset 4096
 //
 // They meet in the middle = free space. If they would overlap, page is full.
 //
 // Example: page with 48 records, each ~30 bytes
-//   FreeOffset = 16 + (48 × 5) = 256 bytes (header + line ptrs + null bitmaps)
-//   Records = 48 × 30 = 1440 bytes
-//   Records start at 4096 - 1440 = 2656
-//   Free space = 2656 - 256 = 2400 bytes
-//   HasSpace(30) → 256 + 5 + 30 = 291 ≤ 2656 → true
+//
+//	FreeOffset = 16 + (48 × 5) = 256 bytes (header + line ptrs + null bitmaps)
+//	Records = 48 × 30 = 1440 bytes
+//	Records start at 4096 - 1440 = 2656
+//	Free space = 2656 - 256 = 2400 bytes
+//	HasSpace(30) → 256 + 5 + 30 = 291 ≤ 2656 → true
 //
 // Example: page with 50 records (full)
-//   FreeOffset = 16 + (50 × 5) = 266
-//   Records = 50 × 30 = 1500
-//   Records start at 4096 - 1500 = 2596
-//   Free space = 2596 - 266 = 2330 bytes
-//   HasSpace(30) → 266 + 5 + 30 = 301 ≤ 2596 → true (still fits)
+//
+//	FreeOffset = 16 + (50 × 5) = 266
+//	Records = 50 × 30 = 1500
+//	Records start at 4096 - 1500 = 2596
+//	Free space = 2596 - 266 = 2330 bytes
+//	HasSpace(30) → 266 + 5 + 30 = 301 ≤ 2596 → true (still fits)
 //
 // Example: page with 51 records (truly full)
-//   FreeOffset = 16 + (51 × 5) = 271
-//   Records = 51 × 30 = 1530
-//   Records start at 4096 - 1530 = 2566
-//   Free space = 2566 - 271 = 2295 bytes
-//   HasSpace(30) → 271 + 5 + 30 = 306 ≤ 2566 → true
+//
+//	FreeOffset = 16 + (51 × 5) = 271
+//	Records = 51 × 30 = 1530
+//	Records start at 4096 - 1530 = 2566
+//	Free space = 2566 - 271 = 2295 bytes
+//	HasSpace(30) → 271 + 5 + 30 = 306 ≤ 2566 → true
 //
 // Wait, 50 records at 30 bytes each = 1500. 4096 - 1500 = 2596.
 // Line pointers: 50 × 4 = 200. Null bitmaps: 50 × 1 = 50. Total: 250 + 16 = 266.
@@ -198,16 +208,18 @@ func (p *Page) HasSpace(recordLen int) bool {
 // Free space = where records start - where metadata ends
 //
 // Example: page with 48 records of 30 bytes each
-//   FreeOffset = 16 + (48 × 5) = 256
-//   Records = 48 × 30 = 1440
-//   Records start at 4096 - 1440 = 2656
-//   Free space = 2656 - 256 = 2400 bytes
+//
+//	FreeOffset = 16 + (48 × 5) = 256
+//	Records = 48 × 30 = 1440
+//	Records start at 4096 - 1440 = 2656
+//	Free space = 2656 - 256 = 2400 bytes
 //
 // Example: empty page
-//   FreeOffset = 16 (just header)
-//   Records = 0
-//   Records start at 4096
-//   Free space = 4096 - 16 = 4080 bytes
+//
+//	FreeOffset = 16 (just header)
+//	Records = 0
+//	Records start at 4096
+//	Free space = 4096 - 16 = 4080 bytes
 func (p *Page) GetFreeSpace() int {
 	recordsStart := PageSize - len(p.Records)
 	return recordsStart - int(p.Header.FreeOffset)

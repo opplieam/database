@@ -12,10 +12,10 @@ import (
 
 func TestEncodeDecodeMovieRecord(t *testing.T) {
 	tests := []struct {
-		name    string
-		id      uint32
-		title   string
-		genres  string
+		name   string
+		id     uint32
+		title  string
+		genres string
 	}{
 		{"basic movie", 1, "Toy Story (1995)", "Adventure|Animation|Children|Comedy|Fantasy"},
 		{"long title", 2, "Jumanji (1995)", "Adventure|Children|Fantasy"},
