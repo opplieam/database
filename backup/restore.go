@@ -10,6 +10,11 @@ import (
 	"database/wal"
 )
 
+// restorePoolSize sizes the throwaway pool replay runs through. Small
+// on purpose: the pool owns no file handles and dies with the call, so
+// it holds only the pages under repair and nothing more.
+const restorePoolSize = 4
+
 // Restore puts the cluster in c back to the backup's files plus replay
 // up to target, and leaves it shut down: pages flushed, log cut at the
 // stop, the way a machine looks just after a crash ends. Every handle
@@ -75,7 +80,7 @@ func Restore(c Cluster, backupDir string, target time.Time, mgr *tx.Manager) err
 	}
 	defer clog.Close()
 
-	pool := buffer.NewBufferPool(4)
+	pool := buffer.NewBufferPool(restorePoolSize)
 	nextXid, epoch, stopLSN, err := pool.Recover(c.Data, seg, c.Ctl, clog, target)
 	if err != nil {
 		return err
