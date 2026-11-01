@@ -23,6 +23,15 @@ type Cluster struct {
 	Archives string // archive directory: copies of the WAL, outside the cluster
 }
 
+// files names the three cluster files Backup copies out and Restore
+// copies back. WAL and Archives are excluded on purpose: the segment
+// is archived and reopened rather than copied as one of these files,
+// and the label, not a directory listing, decides which archive a
+// restore reads.
+func (c Cluster) files() []string {
+	return []string{c.Data, c.Clog, c.Ctl}
+}
+
 // Backup writes a base backup into outDir.
 //
 // The order below is the lesson. Checkpoint first, so REDO names the
@@ -68,7 +77,7 @@ func Backup(c Cluster, outDir string, flusher wal.Flusher,
 	//    copy is never read: restore rewrites it from the label's
 	//    REDO before recovery opens it. It is kept so the backup
 	//    holds every file the cluster had.
-	for _, p := range []string{c.Data, c.Clog, c.Ctl} {
+	for _, p := range c.files() {
 		dst := filepath.Join(outDir, filepath.Base(p))
 		if err := copyFile(p, dst); err != nil {
 			return err

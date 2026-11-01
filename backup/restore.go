@@ -49,7 +49,7 @@ func Restore(c Cluster, backupDir string, target time.Time, mgr *tx.Manager) err
 			archived, label.ArchiveSeq)
 	}
 
-	for _, p := range []string{c.Data, c.Clog, c.Ctl} {
+	for _, p := range c.files() {
 		src := filepath.Join(backupDir, filepath.Base(p))
 		if err := copyFile(src, p); err != nil {
 			return err
