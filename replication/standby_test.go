@@ -16,21 +16,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newCluster wires one pool-backed cluster in dir: data alongside its
-// log, control file, and archive directory, with the segment and pool
-// wired the way a running primary has them.
-func newCluster(t *testing.T, dir string) (backup.Cluster, *buffer.BufferPool,
-	*wal.Segment, *tx.CommitLog, *tx.Manager) {
-	t.Helper()
-	require.NoError(t, os.MkdirAll(dir, 0755))
-
-	c := backup.Cluster{
+// standbyCluster names the paths a standby will occupy. Nothing is
+// created: bootstrap copies the files in.
+func standbyCluster(dir string) backup.Cluster {
+	return backup.Cluster{
 		Data:     filepath.Join(dir, "movies.data"),
 		Clog:     filepath.Join(dir, "movies.clog"),
 		Ctl:      filepath.Join(dir, "movies.ctl"),
 		WAL:      filepath.Join(dir, "movies.wal"),
 		Archives: filepath.Join(dir, "archive"),
 	}
+}
+
+// newCluster wires one pool-backed cluster in dir: the same paths
+// standbyCluster names, plus the files themselves, with the segment and
+// pool wired the way a running primary has them.
+func newCluster(t *testing.T, dir string) (backup.Cluster, *buffer.BufferPool,
+	*wal.Segment, *tx.CommitLog, *tx.Manager) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(dir, 0755))
+
+	c := standbyCluster(dir)
 	f, err := storage.Create(c.Data)
 	require.NoError(t, err)
 	require.NoError(t, f.AppendPage(storage.NewPage(0)))
@@ -47,18 +53,6 @@ func newCluster(t *testing.T, dir string) (backup.Cluster, *buffer.BufferPool,
 	pool := buffer.NewBufferPool(4)
 	pool.SetWAL(seg)
 	return c, pool, seg, clog, tx.NewManager()
-}
-
-// standbyCluster names the paths a standby will occupy. Nothing is
-// created: bootstrap copies the files in.
-func standbyCluster(dir string) backup.Cluster {
-	return backup.Cluster{
-		Data:     filepath.Join(dir, "movies.data"),
-		Clog:     filepath.Join(dir, "movies.clog"),
-		Ctl:      filepath.Join(dir, "movies.ctl"),
-		WAL:      filepath.Join(dir, "movies.wal"),
-		Archives: filepath.Join(dir, "archive"),
-	}
 }
 
 // insertPooled writes one row through the pool in its own transaction:
