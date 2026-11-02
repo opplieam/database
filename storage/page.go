@@ -225,6 +225,17 @@ func (p *Page) GetFreeSpace() int {
 	return recordsStart - int(p.Header.FreeOffset)
 }
 
+// recordStart turns a line pointer's page offset into an index into Records.
+// Records grow backward from the end of the page, so Records[0] sits at page
+// offset PageSize - len(Records).
+//
+// Example: one 22-byte record on an empty page
+//
+//	lp.Offset = 4074, len(Records) = 22 → 4074 - (4096 - 22) = 0
+func (p *Page) recordStart(lp LinePointer) int {
+	return int(lp.Offset) - (PageSize - len(p.Records))
+}
+
 // GetRecord returns the record at the given index.
 func (p *Page) GetRecord(index int) ([]byte, error) {
 	if index < 0 || index >= int(p.Header.RecordCount) {
@@ -233,7 +244,7 @@ func (p *Page) GetRecord(index int) ([]byte, error) {
 
 	lp := p.LinePointers[index]
 	record := make([]byte, lp.Length)
-	copy(record, p.Records[lp.Offset-uint16(PageSize-len(p.Records)):])
+	copy(record, p.Records[p.recordStart(lp):])
 	return record, nil
 }
 
@@ -311,8 +322,8 @@ func (p *Page) FreezeTuple(index int, newTxMin uint64) error {
 	// TxMin is fixed 8 bytes, so length won't change
 	// Just replace the bytes in place
 	lp := &p.LinePointers[index]
-	recordStart := int(lp.Offset) - (PageSize - len(p.Records))
-	copy(p.Records[recordStart:recordStart+int(lp.Length)], newRecordBytes)
+	start := p.recordStart(*lp)
+	copy(p.Records[start:start+int(lp.Length)], newRecordBytes)
 
 	return nil
 }
