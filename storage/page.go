@@ -44,7 +44,6 @@ type Page struct {
 	LinePointers []LinePointer
 	NullBitmaps  []uint8 // one byte per record, bits represent null columns
 	Records      []byte
-	data         [PageSize]byte
 }
 
 // NewPage creates a new empty page with the given id.
